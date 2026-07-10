@@ -1,0 +1,6 @@
+api_url: https://your-railway-app.up.railway.app
+api_key: your-sync-agent-api-key
+garmin_db_path: ~/HealthData/DBs/garmin.db
+garmin_activities_db_path: ~/HealthData/DBs/garmin_activities.db
+cursors_path: ~/.jarvis/cursors.json
+agent_version: "1.0.0"
