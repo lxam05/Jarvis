@@ -71,6 +71,8 @@ class DashboardTodayResponse(BaseModel):
     insights: list[InsightCard] = Field(default_factory=list)
     last_garmin_sync: datetime | None = None
     calories_burned: int = 0
+    # Day sleep/steps/burn came from when today's Garmin summary is not downloaded yet.
+    garmin_metrics_as_of: date | None = None
 
 
 class WeightTrendPoint(BaseModel):

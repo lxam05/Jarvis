@@ -40,8 +40,6 @@ async def get_dashboard_today(db, user_id) -> DashboardTodayResponse:
     start = datetime.combine(today, datetime.min.time(), tzinfo=UTC)
     end = start + timedelta(days=1)
 
-    ctx = await build_context(db, user_id, today)
-
     settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
     settings = settings_result.scalar_one_or_none()
 
@@ -100,6 +98,8 @@ async def get_dashboard_today(db, user_id) -> DashboardTodayResponse:
         trend_7d=weight_trend[-7:] if weight_trend else [],
     )
 
+    # Prefer today's Garmin rows; if Connect hasn't published today's downloadable
+    # summary yet, fall back to the latest day we have so sleep/steps still show.
     sleep_result = await db.execute(
         select(GarminSleep).where(GarminSleep.user_id == user_id, GarminSleep.day == today)
     )
@@ -114,6 +114,40 @@ async def get_dashboard_today(db, user_id) -> DashboardTodayResponse:
         select(GarminHrv).where(GarminHrv.user_id == user_id, GarminHrv.day == today)
     )
     hrv = hrv_result.scalar_one_or_none()
+
+    metrics_day = today
+    if sleep is None and daily is None:
+        latest_daily = await db.execute(
+            select(GarminDailySummary)
+            .where(GarminDailySummary.user_id == user_id)
+            .order_by(GarminDailySummary.day.desc())
+            .limit(1)
+        )
+        daily = latest_daily.scalar_one_or_none()
+        if daily is not None:
+            metrics_day = daily.day
+            sleep_result = await db.execute(
+                select(GarminSleep).where(
+                    GarminSleep.user_id == user_id, GarminSleep.day == metrics_day
+                )
+            )
+            sleep = sleep_result.scalar_one_or_none()
+            hrv_result = await db.execute(
+                select(GarminHrv).where(GarminHrv.user_id == user_id, GarminHrv.day == metrics_day)
+            )
+            hrv = hrv_result.scalar_one_or_none()
+        else:
+            latest_sleep = await db.execute(
+                select(GarminSleep)
+                .where(GarminSleep.user_id == user_id)
+                .order_by(GarminSleep.day.desc())
+                .limit(1)
+            )
+            sleep = latest_sleep.scalar_one_or_none()
+            if sleep is not None:
+                metrics_day = sleep.day
+
+    ctx = await build_context(db, user_id, metrics_day)
     recovery = RecoveryCard(
         sleep_score=sleep.score if sleep else None,
         sleep_hours=round(sleep.total_seconds / 3600, 1) if sleep and sleep.total_seconds else None,
@@ -146,7 +180,19 @@ async def get_dashboard_today(db, user_id) -> DashboardTodayResponse:
     )
     today_list = today_acts.scalars().all()
     activity_burned = sum(a.calories or 0 for a in today_list)
-    calories_burned = daily.calories_total if daily and daily.calories_total else activity_burned
+    # Burned calories: prefer today's daily total; if missing, use today's activities only
+    # (don't use a prior day's calorie total as "today burned").
+    today_daily_result = await db.execute(
+        select(GarminDailySummary).where(
+            GarminDailySummary.user_id == user_id, GarminDailySummary.day == today
+        )
+    )
+    today_daily = today_daily_result.scalar_one_or_none()
+    calories_burned = (
+        today_daily.calories_total
+        if today_daily and today_daily.calories_total
+        else activity_burned
+    )
 
     training = TrainingCard(
         activities_today=[_activity_dict(a) for a in today_list],
@@ -203,6 +249,7 @@ async def get_dashboard_today(db, user_id) -> DashboardTodayResponse:
         insights=insights,
         last_garmin_sync=last_sync.finished_at if last_sync else None,
         calories_burned=calories_burned,
+        garmin_metrics_as_of=metrics_day if metrics_day != today else None,
     )
 
 

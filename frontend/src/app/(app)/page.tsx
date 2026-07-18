@@ -127,6 +127,13 @@ export default function DashboardPage() {
   const sleep = data.recovery.sleep_score;
   const consumed = data.macros.calories;
   const burned = data.calories_burned;
+  const asOf = data.garmin_metrics_as_of
+    ? new Date(data.garmin_metrics_as_of).toLocaleDateString("en-GB", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+      })
+    : null;
 
   const todayIds = new Set(data.training.activities_today.map((a) => a.id));
   const now = new Date();
@@ -155,6 +162,7 @@ export default function DashboardPage() {
               month: "long",
               day: "numeric",
             })}
+            {asOf ? ` · sleep/steps as of ${asOf}` : ""}
           </p>
         </div>
         <SyncBadge lastSync={data.last_garmin_sync} />
@@ -169,7 +177,14 @@ export default function DashboardPage() {
           label="Steps"
           icon={Footprints}
           value={steps != null ? steps.toLocaleString() : "—"}
-          detail={stepGoal ? `Goal ${stepGoal.toLocaleString()}` : undefined}
+          detail={
+            [
+              stepGoal ? `Goal ${stepGoal.toLocaleString()}` : null,
+              asOf ? `As of ${asOf}` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ") || undefined
+          }
         />
         <MetricTile
           label="Sleep"
@@ -177,7 +192,12 @@ export default function DashboardPage() {
           value={sleep != null ? String(sleep) : "—"}
           unit={sleep != null ? "/ 100" : undefined}
           detail={
-            data.recovery.sleep_hours != null ? `${data.recovery.sleep_hours} hours` : undefined
+            [
+              data.recovery.sleep_hours != null ? `${data.recovery.sleep_hours} hours` : null,
+              asOf ? `As of ${asOf}` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ") || undefined
           }
         />
         <MetricTile
@@ -208,7 +228,7 @@ export default function DashboardPage() {
           <h2 className="hud-label mb-4">This week</h2>
           <div className="space-y-3">
             {thisWeek.map((activity) => (
-              <ActivityRow key={activity.id} activity={activity} />
+              <ActivityRow key={activity.id} activity={activity} showDate />
             ))}
           </div>
         </section>
@@ -219,7 +239,7 @@ export default function DashboardPage() {
           <h2 className="hud-label mb-4">Previous</h2>
           <div className="space-y-3">
             {previous.map((activity) => (
-              <ActivityRow key={activity.id} activity={activity} />
+              <ActivityRow key={activity.id} activity={activity} showDate />
             ))}
           </div>
         </section>

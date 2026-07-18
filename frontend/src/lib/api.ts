@@ -77,6 +77,7 @@ export type DashboardToday = {
   insights: Array<{ title: string; body: string; category: string; severity: string }>;
   last_garmin_sync: string | null;
   calories_burned: number;
+  garmin_metrics_as_of: string | null;
 };
 
 export type Meal = {
