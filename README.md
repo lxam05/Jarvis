@@ -58,6 +58,7 @@ Jarvis/
 | `JWT_SECRET` | Web auth secret |
 | `SYNC_AGENT_API_KEY` | Sync agent bearer token |
 | `OPENAI_API_KEY` | Nutrition AI & coaching |
+| `STRIPE_SECRET_KEY` | Read-only Stripe key for business metrics (prefer restricted) |
 | `NEXT_PUBLIC_API_URL` | Frontend → API URL |
 
 ## Railway Deployment

@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     meal_confidence_threshold: float = 0.75
     # Target race for session coaching (Half Ironman).
     half_ironman_race_date: str = "2026-09-13"
+    # Read-only Stripe secret (or restricted key) for business metrics.
+    stripe_secret_key: str = ""
 
     @property
     def cors_origin_list(self) -> list[str]:

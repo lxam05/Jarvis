@@ -239,6 +239,12 @@ body {
   }
 }
 
+@keyframes hud-spin-rev {
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
 @keyframes hud-pulse {
   0%,
   100% {
@@ -256,6 +262,44 @@ body {
   100% {
     transform: translateY(100%);
   }
+}
+
+@keyframes hud-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes hud-core-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 24px rgba(0, 212, 255, 0.55),
+      0 0 64px rgba(0, 160, 220, 0.35),
+      inset 0 0 28px rgba(0, 212, 255, 0.45);
+  }
+  50% {
+    box-shadow:
+      0 0 36px rgba(0, 212, 255, 0.8),
+      0 0 90px rgba(0, 160, 220, 0.5),
+      inset 0 0 40px rgba(0, 212, 255, 0.65);
+  }
+}
+
+.hud-ring-spin {
+  animation: hud-spin 48s linear infinite;
+}
+
+.hud-ring-spin-slow {
+  animation: hud-spin 90s linear infinite;
+}
+
+.hud-ring-spin-rev {
+  animation: hud-spin-rev 64s linear infinite;
+}
+
+.hud-core-glow {
+  animation: hud-core-pulse 3.2s ease-in-out infinite;
 }
 
 .hud-spinner {

@@ -243,6 +243,38 @@ export const api = {
       recent_mix: Record<string, number>;
     }>("/v1/coaching/session"),
 
+  stripeOverview: () =>
+    apiFetch<{
+      configured: boolean;
+      currency: string;
+      balance_available: number;
+      balance_pending: number;
+      today: { revenue: number; charge_count: number; currency: string };
+      last_7d: { revenue: number; charge_count: number; currency: string };
+      last_30d: { revenue: number; charge_count: number; currency: string };
+      mrr: number | null;
+      active_subscriptions: number | null;
+      recent_charges: Array<{
+        id: string;
+        amount: number;
+        currency: string;
+        status: string;
+        description: string | null;
+        created_at: string;
+        customer_email: string | null;
+      }>;
+      recent_payouts: Array<{
+        id: string;
+        amount: number;
+        currency: string;
+        status: string;
+        arrival_date: string | null;
+        created_at: string;
+      }>;
+      recap: string;
+      dashboard_url: string;
+    }>("/v1/stripe/overview"),
+
   updateSettings: (settings: Record<string, number | null>) =>
     apiFetch<{ ok: boolean }>("/v1/auth/settings", {
       method: "PUT",

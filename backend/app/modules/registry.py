@@ -5,6 +5,7 @@ REGISTERED_MODULES: list[str] = [
     "nutrition",
     "coaching",
     "dashboard",
+    "stripe",
 ]
 
 
