@@ -78,6 +78,18 @@ export type DashboardToday = {
   last_garmin_sync: string | null;
   calories_burned: number;
   garmin_metrics_as_of: string | null;
+  him_readiness?: {
+    overall: number;
+    status: string;
+    weeks_to_race: number;
+    phase: string;
+    race_name: string;
+    race_date: string;
+    readiness: { score: number; label: string; detail: string };
+    food: { score: number; label: string; detail: string };
+    training: { score: number; label: string; detail: string };
+    summary: string;
+  } | null;
 };
 
 export type Meal = {

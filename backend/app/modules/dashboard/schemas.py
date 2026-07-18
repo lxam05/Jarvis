@@ -59,6 +59,25 @@ class InsightCard(BaseModel):
     severity: str
 
 
+class HimPillarScore(BaseModel):
+    score: float
+    label: str
+    detail: str
+
+
+class HimReadinessCard(BaseModel):
+    overall: float
+    status: str
+    weeks_to_race: int
+    phase: str
+    race_name: str = "Half Ironman"
+    race_date: date
+    readiness: HimPillarScore
+    food: HimPillarScore
+    training: HimPillarScore
+    summary: str
+
+
 class DashboardTodayResponse(BaseModel):
     date: date
     macros: MacroSummary
@@ -73,6 +92,7 @@ class DashboardTodayResponse(BaseModel):
     calories_burned: int = 0
     # Day sleep/steps/burn came from when today's Garmin summary is not downloaded yet.
     garmin_metrics_as_of: date | None = None
+    him_readiness: HimReadinessCard | None = None
 
 
 class WeightTrendPoint(BaseModel):

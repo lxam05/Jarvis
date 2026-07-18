@@ -3,12 +3,15 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.modules.coaching.models import CoachingInsight
 from app.modules.coaching.service import _compute_recovery_score, build_context
 from app.modules.core.models import UserSettings
 from app.modules.dashboard.schemas import (
     DashboardTodayResponse,
     GoalsCard,
+    HimPillarScore,
+    HimReadinessCard,
     InsightCard,
     MacroSummary,
     RecoveryCard,
@@ -247,6 +250,14 @@ async def get_dashboard_today(db, user_id) -> DashboardTodayResponse:
     )
     last_sync = sync_result.scalar_one_or_none()
 
+    him_readiness = await _compute_him_readiness(
+        db,
+        user_id,
+        recovery_score=recovery.recovery_score,
+        macros=macros,
+        weekly_activities=training.weekly_activities,
+    )
+
     return DashboardTodayResponse(
         date=today,
         macros=macros,
@@ -260,6 +271,7 @@ async def get_dashboard_today(db, user_id) -> DashboardTodayResponse:
         last_garmin_sync=last_sync.finished_at if last_sync else None,
         calories_burned=calories_burned,
         garmin_metrics_as_of=metrics_day if metrics_day != today else None,
+        him_readiness=him_readiness,
     )
 
 
@@ -344,6 +356,188 @@ async def get_weekly_sport_distance(
         for week_start, vals in buckets.items()
     ]
     return WeeklySportDistanceResponse(weeks=points)
+
+
+def _parse_race_date() -> date:
+    try:
+        return date.fromisoformat(settings.half_ironman_race_date)
+    except ValueError:
+        return date.today() + timedelta(weeks=8)
+
+
+def _phase_for_weeks(weeks: int) -> str:
+    if weeks <= 0:
+        return "race"
+    if weeks <= 2:
+        return "taper"
+    if weeks <= 4:
+        return "peak"
+    if weeks <= 6:
+        return "build"
+    return "base"
+
+
+def _weekly_volume_targets(phase: str) -> dict[str, float]:
+    """Soft weekly km targets by HIM phase (run / bike / swim)."""
+    targets = {
+        "base": {"running": 25.0, "cycling": 80.0, "swimming": 3.0},
+        "build": {"running": 35.0, "cycling": 120.0, "swimming": 4.0},
+        "peak": {"running": 40.0, "cycling": 150.0, "swimming": 5.0},
+        "taper": {"running": 18.0, "cycling": 50.0, "swimming": 2.5},
+        "race": {"running": 8.0, "cycling": 20.0, "swimming": 1.5},
+    }
+    return targets.get(phase, targets["base"])
+
+
+def _goal_adherence_score(actual: float, goal: float) -> float:
+    """100 at goal; drops if under or over (sweet spot ~90–110%)."""
+    if goal <= 0:
+        return 50.0
+    ratio = actual / goal
+    if ratio <= 1.0:
+        return max(0.0, min(100.0, ratio * 100.0))
+    # Soft penalty past goal; still ok until ~1.15
+    over = ratio - 1.0
+    return max(0.0, min(100.0, 100.0 - over * 180.0))
+
+
+def _pillar_label(score: float) -> str:
+    if score >= 80:
+        return "Strong"
+    if score >= 65:
+        return "Good"
+    if score >= 45:
+        return "Okay"
+    return "Needs work"
+
+
+def _overall_status(score: float) -> str:
+    if score >= 80:
+        return "on_track"
+    if score >= 65:
+        return "solid"
+    if score >= 45:
+        return "caution"
+    return "off_track"
+
+
+async def _week_sport_km(db: AsyncSession, user_id) -> dict[str, float]:
+    today = date.today()
+    monday = _monday_on_or_before(today)
+    start_dt = datetime.combine(monday, datetime.min.time(), tzinfo=UTC)
+    end_dt = datetime.combine(monday + timedelta(days=7), datetime.min.time(), tzinfo=UTC)
+    result = await db.execute(
+        select(GarminActivity.sport, GarminActivity.distance_m).where(
+            GarminActivity.user_id == user_id,
+            GarminActivity.start_at >= start_dt,
+            GarminActivity.start_at < end_dt,
+        )
+    )
+    volumes = {"running": 0.0, "cycling": 0.0, "swimming": 0.0}
+    for sport, distance_m in result.all():
+        key = (sport or "").lower().strip()
+        if key in volumes and distance_m is not None:
+            volumes[key] += float(distance_m) / 1000.0
+    return volumes
+
+
+async def _compute_him_readiness(
+    db: AsyncSession,
+    user_id,
+    *,
+    recovery_score: float,
+    macros: MacroSummary,
+    weekly_activities: int,
+) -> HimReadinessCard:
+    race_date = _parse_race_date()
+    weeks = max(0, (race_date - date.today()).days // 7)
+    phase = _phase_for_weeks(weeks)
+
+    readiness_score = float(max(0.0, min(100.0, recovery_score)))
+    readiness = HimPillarScore(
+        score=round(readiness_score, 1),
+        label=_pillar_label(readiness_score),
+        detail=f"Recovery {readiness_score:.0f}/100 from sleep · HRV · body battery",
+    )
+
+    food_parts: list[float] = []
+    food_bits: list[str] = []
+    if macros.calorie_goal:
+        cal_score = _goal_adherence_score(float(macros.calories), float(macros.calorie_goal))
+        food_parts.append(cal_score)
+        food_bits.append(f"{macros.calories}/{macros.calorie_goal} kcal")
+    elif macros.calories > 0:
+        food_parts.append(55.0)
+        food_bits.append(f"{macros.calories} kcal logged (no goal set)")
+    else:
+        # Morning / empty day — don't tank the HIM board to zero
+        hour = datetime.now().hour
+        food_parts.append(55.0 if hour < 11 else 25.0)
+        food_bits.append("No meals logged yet")
+
+    if macros.protein_goal_g:
+        prot_score = _goal_adherence_score(float(macros.protein_g), float(macros.protein_goal_g))
+        food_parts.append(prot_score)
+        food_bits.append(f"{macros.protein_g:.0f}/{macros.protein_goal_g}g protein")
+    elif macros.protein_g > 0:
+        food_parts.append(50.0)
+
+    food_score = sum(food_parts) / len(food_parts)
+    food = HimPillarScore(
+        score=round(food_score, 1),
+        label=_pillar_label(food_score),
+        detail=" · ".join(food_bits),
+    )
+
+    volumes = await _week_sport_km(db, user_id)
+    targets = _weekly_volume_targets(phase)
+    sport_scores = []
+    for sport, target in targets.items():
+        actual = volumes[sport]
+        sport_scores.append(min(100.0, (actual / target) * 100.0) if target > 0 else 0.0)
+    volume_score = sum(sport_scores) / len(sport_scores) if sport_scores else 0.0
+    # Target ~5 quality sessions / week in build; fewer in taper
+    session_target = 3 if phase in ("taper", "race") else 5
+    session_score = min(100.0, (weekly_activities / session_target) * 100.0)
+    training_score = volume_score * 0.7 + session_score * 0.3
+    training = HimPillarScore(
+        score=round(training_score, 1),
+        label=_pillar_label(training_score),
+        detail=(
+            f"This week run {volumes['running']:.0f}/{targets['running']:.0f} · "
+            f"ride {volumes['cycling']:.0f}/{targets['cycling']:.0f} · "
+            f"swim {volumes['swimming']:.1f}/{targets['swimming']:.1f} km · "
+            f"{weekly_activities} sessions"
+        ),
+    )
+
+    overall = (readiness_score + food_score + training_score) / 3.0
+    status = _overall_status(overall)
+    status_copy = {
+        "on_track": "On track for race day.",
+        "solid": "Solid — a few gaps to close.",
+        "caution": "Caution — recovery, food, or volume needs attention.",
+        "off_track": "Off track — prioritize the weakest pillar today.",
+    }[status]
+    weakest = min(
+        [("readiness", readiness_score), ("food", food_score), ("training", training_score)],
+        key=lambda x: x[1],
+    )[0]
+    summary = (
+        f"{status_copy} {weeks}w out ({phase}). Weakest today: {weakest}."
+    )
+
+    return HimReadinessCard(
+        overall=round(overall, 1),
+        status=status,
+        weeks_to_race=weeks,
+        phase=phase,
+        race_date=race_date,
+        readiness=readiness,
+        food=food,
+        training=training,
+        summary=summary,
+    )
 
 
 async def _meal_logging_streak(db: AsyncSession, user_id) -> int:
