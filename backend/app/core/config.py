@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o"
     openai_embedding_model: str = "text-embedding-3-small"
     meal_confidence_threshold: float = 0.75
+    # Target race for session coaching (Half Ironman).
+    half_ironman_race_date: str = "2026-09-13"
 
     @property
     def cors_origin_list(self) -> list[str]:

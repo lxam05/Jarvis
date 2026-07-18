@@ -10,7 +10,14 @@ from app.core.config import settings
 from app.core.db import session_scope
 from app.core.events import DomainEvent
 from app.modules.coaching.models import CoachingInsight
-from app.modules.coaching.schemas import ActivitySummary, CoachingContext, CoachingFlag, InsightOutput
+from app.modules.coaching.schemas import (
+    ActivitySummary,
+    CoachingContext,
+    CoachingFlag,
+    InsightOutput,
+    SessionRecommendationResponse,
+    SportSession,
+)
 from app.modules.core.models import UserSettings
 from app.modules.garmin.models import GarminActivity, GarminDailySummary, GarminHrv, GarminSleep
 from app.modules.nutrition.models import BodyWeightEntry, Meal
@@ -287,3 +294,314 @@ async def on_domain_event(event: DomainEvent) -> None:
         user_id = uuid.UUID(event.payload["user_id"])
         async with session_scope() as db:
             await regenerate_insights(db, user_id)
+
+
+def _parse_race_date() -> date:
+    try:
+        return date.fromisoformat(settings.half_ironman_race_date)
+    except ValueError:
+        return date.today() + timedelta(weeks=8)
+
+
+def _phase_for_weeks(weeks: int) -> str:
+    if weeks <= 0:
+        return "race"
+    if weeks <= 2:
+        return "taper"
+    if weeks <= 4:
+        return "peak"
+    if weeks <= 6:
+        return "build"
+    return "base"
+
+
+async def _latest_recovery(db: AsyncSession, user_id: uuid.UUID) -> tuple[float, int | None, str | None]:
+    """Prefer today; fall back to newest sleep/daily day (same as dashboard)."""
+    today = date.today()
+    sleep_result = await db.execute(
+        select(GarminSleep).where(GarminSleep.user_id == user_id, GarminSleep.day == today)
+    )
+    sleep = sleep_result.scalar_one_or_none()
+    daily_result = await db.execute(
+        select(GarminDailySummary).where(GarminDailySummary.user_id == user_id, GarminDailySummary.day == today)
+    )
+    daily = daily_result.scalar_one_or_none()
+    hrv_result = await db.execute(
+        select(GarminHrv).where(GarminHrv.user_id == user_id, GarminHrv.day == today)
+    )
+    hrv = hrv_result.scalar_one_or_none()
+    metrics_day = today
+
+    if sleep is None and daily is None:
+        latest_daily = await db.execute(
+            select(GarminDailySummary)
+            .where(GarminDailySummary.user_id == user_id)
+            .order_by(GarminDailySummary.day.desc())
+            .limit(1)
+        )
+        daily = latest_daily.scalar_one_or_none()
+        if daily is not None:
+            metrics_day = daily.day
+            sleep_result = await db.execute(
+                select(GarminSleep).where(GarminSleep.user_id == user_id, GarminSleep.day == metrics_day)
+            )
+            sleep = sleep_result.scalar_one_or_none()
+            hrv_result = await db.execute(
+                select(GarminHrv).where(GarminHrv.user_id == user_id, GarminHrv.day == metrics_day)
+            )
+            hrv = hrv_result.scalar_one_or_none()
+        else:
+            latest_sleep = await db.execute(
+                select(GarminSleep)
+                .where(GarminSleep.user_id == user_id)
+                .order_by(GarminSleep.day.desc())
+                .limit(1)
+            )
+            sleep = latest_sleep.scalar_one_or_none()
+            if sleep is not None:
+                metrics_day = sleep.day
+                hrv_result = await db.execute(
+                    select(GarminHrv).where(GarminHrv.user_id == user_id, GarminHrv.day == metrics_day)
+                )
+                hrv = hrv_result.scalar_one_or_none()
+
+    recovery = _compute_recovery_score(sleep, hrv, daily)
+    return recovery, sleep.score if sleep else None, hrv.status if hrv else None
+
+
+async def _sport_volume_7d(db: AsyncSession, user_id: uuid.UUID) -> dict[str, float]:
+    since = datetime.now(UTC) - timedelta(days=7)
+    result = await db.execute(
+        select(GarminActivity.sport, GarminActivity.distance_m).where(
+            GarminActivity.user_id == user_id,
+            GarminActivity.start_at >= since,
+        )
+    )
+    volumes = {"running": 0.0, "cycling": 0.0, "swimming": 0.0}
+    for sport, distance_m in result.all():
+        key = (sport or "").lower().strip()
+        if key in volumes:
+            volumes[key] += float(distance_m or 0) / 1000.0
+    return volumes
+
+
+async def _days_since_sport(db: AsyncSession, user_id: uuid.UUID) -> dict[str, int]:
+    out = {"running": 99, "cycling": 99, "swimming": 99}
+    for sport in out:
+        result = await db.execute(
+            select(GarminActivity.start_at)
+            .where(GarminActivity.user_id == user_id, func.lower(GarminActivity.sport) == sport)
+            .order_by(GarminActivity.start_at.desc())
+            .limit(1)
+        )
+        start_at = result.scalar_one_or_none()
+        if start_at is not None:
+            out[sport] = max(0, (datetime.now(UTC) - start_at).days)
+    return out
+
+
+def _build_sessions(phase: str, recovery: float, recommended: str) -> list[SportSession]:
+    easy = recovery < 50
+    hard_ok = recovery >= 65 and phase in ("base", "build", "peak")
+
+    if phase == "taper":
+        return [
+            SportSession(
+                sport="running",
+                title="Taper run",
+                duration_min=35 if recommended == "running" else 30,
+                intensity="easy",
+                description="Keep cadence light. Include 4×20s strides if legs feel good.",
+                focus="Freshness for race day",
+            ),
+            SportSession(
+                sport="cycling",
+                title="Taper spin",
+                duration_min=50 if recommended == "cycling" else 40,
+                intensity="easy",
+                description="Z2 spin, smooth cadence. Optional 3×1 min openers.",
+                focus="Keep bike feel without fatigue",
+            ),
+            SportSession(
+                sport="swimming",
+                title="Taper swim",
+                duration_min=30 if recommended == "swimming" else 25,
+                intensity="easy",
+                description="Technique + 4×50 race-pace feelers. Long rest.",
+                focus="Touch race pace, stay sharp",
+            ),
+        ]
+
+    if easy or phase == "race":
+        return [
+            SportSession(
+                sport="running",
+                title="Recovery jog",
+                duration_min=30,
+                intensity="recovery",
+                description="Very easy conversational pace. Stop if form breaks down.",
+                focus="Flush legs / restore",
+            ),
+            SportSession(
+                sport="cycling",
+                title="Easy spin",
+                duration_min=45,
+                intensity="recovery",
+                description="Flat Z1–Z2. High cadence, low torque.",
+                focus="Active recovery",
+            ),
+            SportSession(
+                sport="swimming",
+                title="Technique swim",
+                duration_min=30,
+                intensity="recovery",
+                description="Drills + easy continuous swim. No hard sets.",
+                focus="Skill without stress",
+            ),
+        ]
+
+    run = SportSession(
+        sport="running",
+        title="Threshold bricks" if hard_ok and recommended == "running" else "Aerobic run",
+        duration_min=55 if recommended == "running" else 45,
+        intensity="threshold" if hard_ok and recommended == "running" else "endurance",
+        description=(
+            "20 min easy + 3×8 min @ threshold (2 min easy) + cool-down."
+            if hard_ok and recommended == "running"
+            else "Steady Z2. Finish with 4×20s strides."
+        ),
+        focus="Half marathon durability",
+    )
+    bike = SportSession(
+        sport="cycling",
+        title="Long aerobic ride" if recommended == "cycling" else "Endurance ride",
+        duration_min=120 if recommended == "cycling" and phase in ("build", "peak") else 75,
+        intensity="endurance",
+        description=(
+            "Mostly Z2. Add 3×8 min sweet-spot late if feeling strong."
+            if recommended == "cycling"
+            else "Z2 hills optional. Fuel as you would on race day."
+        ),
+        focus="90 km bike durability",
+    )
+    swim = SportSession(
+        sport="swimming",
+        title="CSS intervals" if hard_ok and recommended == "swimming" else "Aerobic swim",
+        duration_min=45 if recommended == "swimming" else 35,
+        intensity="threshold" if hard_ok and recommended == "swimming" else "endurance",
+        description=(
+            "8×200 @ CSS with 20–30s rest, then easy 200."
+            if hard_ok and recommended == "swimming"
+            else "Continuous aerobic with pull buoy / paddles sets."
+        ),
+        focus="1.9 km swim confidence",
+    )
+    return [run, bike, swim]
+
+
+async def recommend_session(db: AsyncSession, user_id: uuid.UUID) -> SessionRecommendationResponse:
+    race_date = _parse_race_date()
+    weeks = max(0, (race_date - date.today()).days // 7)
+    phase = _phase_for_weeks(weeks)
+    recovery, sleep_score, hrv_status = await _latest_recovery(db, user_id)
+    volumes = await _sport_volume_7d(db, user_id)
+    days_since = await _days_since_sport(db, user_id)
+
+    # HIM emphasis: bike > run > swim for volume, but rotate neglected sports.
+    need = {
+        "cycling": days_since["cycling"] * 1.2 + (40 - min(volumes["cycling"], 40)) * 0.15,
+        "running": days_since["running"] * 1.0 + (25 - min(volumes["running"], 25)) * 0.2,
+        "swimming": days_since["swimming"] * 1.1 + (4 - min(volumes["swimming"], 4)) * 1.5,
+    }
+    if recovery < 45:
+        need = {
+            "swimming": need["swimming"] + 5,
+            "cycling": need["cycling"] + 2,
+            "running": need["running"],
+        }
+    if phase == "taper":
+        need["running"] += 1
+    if phase == "peak":
+        need["cycling"] += 3
+
+    recommended = max(need, key=need.get)
+
+    reasons: list[str] = []
+    if recovery < 45:
+        reasons.append(f"Recovery is low ({recovery:.0f}/100), so intensity stays easy.")
+    elif sleep_score is not None and sleep_score < 65:
+        reasons.append(f"Sleep scored {sleep_score} — avoid a hard hammer session.")
+    else:
+        reasons.append(f"Recovery looks workable ({recovery:.0f}/100).")
+
+    reasons.append(
+        f"Last 7d mix: run {volumes['running']:.1f} km · ride {volumes['cycling']:.1f} km · "
+        f"swim {volumes['swimming']:.1f} km."
+    )
+    reasons.append(
+        f"{recommended.capitalize()} is the priority today "
+        f"({days_since[recommended]}d since last, phase={phase}, {weeks}w to race)."
+    )
+    reason = " ".join(reasons)
+
+    sessions = _build_sessions(phase, recovery, recommended)
+    sessions = sorted(sessions, key=lambda s: 0 if s.sport == recommended else 1)
+
+    if client and settings.openai_api_key:
+        try:
+            response = await client.chat.completions.create(
+                model=settings.openai_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a Half Ironman coach. Given recovery + recent training, "
+                            "return JSON with keys: recommended_sport (running|cycling|swimming), "
+                            "reason (2 short sentences), sessions (array of 3 objects with sport, title, "
+                            "duration_min, intensity, description, focus). Keep sessions practical."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "weeks_to_race": weeks,
+                                "phase": phase,
+                                "recovery_score": recovery,
+                                "sleep_score": sleep_score,
+                                "hrv_status": hrv_status,
+                                "volume_7d_km": volumes,
+                                "days_since": days_since,
+                                "rule_recommended": recommended,
+                                "draft_sessions": [s.model_dump() for s in sessions],
+                            }
+                        ),
+                    },
+                ],
+                response_format={"type": "json_object"},
+            )
+            data = json.loads(response.choices[0].message.content or "{}")
+            if data.get("recommended_sport") in ("running", "cycling", "swimming"):
+                recommended = data["recommended_sport"]
+            if data.get("reason"):
+                reason = str(data["reason"])
+            if isinstance(data.get("sessions"), list) and len(data["sessions"]) >= 3:
+                parsed = [SportSession(**item) for item in data["sessions"][:3]]
+                if {s.sport for s in parsed} >= {"running", "cycling", "swimming"}:
+                    sessions = sorted(parsed, key=lambda s: 0 if s.sport == recommended else 1)
+        except Exception:
+            pass
+
+    return SessionRecommendationResponse(
+        race_name="Half Ironman",
+        race_date=race_date,
+        weeks_to_race=weeks,
+        phase=phase,
+        recovery_score=recovery,
+        sleep_score=sleep_score,
+        hrv_status=hrv_status,
+        recommended_sport=recommended,
+        reason=reason,
+        sessions=sessions,
+        recent_mix={k: round(v, 2) for k, v in volumes.items()},
+    )

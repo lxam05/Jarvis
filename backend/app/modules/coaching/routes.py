@@ -8,9 +8,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import CurrentUser
 from app.core.db import get_db
 from app.modules.coaching.models import CoachingInsight
-from app.modules.coaching.schemas import InsightOutput
+from app.modules.coaching.schemas import InsightOutput, SessionRecommendationResponse
+from app.modules.coaching.service import recommend_session
 
 router = APIRouter(prefix="/coaching", tags=["coaching"])
+
+
+@router.get("/session", response_model=SessionRecommendationResponse)
+async def get_session_recommendation(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: CurrentUser,
+) -> SessionRecommendationResponse:
+    return await recommend_session(db, user.id)
 
 
 @router.get("/insights", response_model=list[InsightOutput])

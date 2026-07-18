@@ -42,3 +42,27 @@ class InsightOutput(BaseModel):
     severity: str
     title: str
     body: str
+
+
+class SportSession(BaseModel):
+    sport: str
+    title: str
+    duration_min: int
+    intensity: str
+    description: str
+    focus: str
+
+
+class SessionRecommendationResponse(BaseModel):
+    race_name: str
+    race_date: date
+    weeks_to_race: int
+    phase: str
+    recovery_score: float
+    sleep_score: int | None = None
+    hrv_status: str | None = None
+    recommended_sport: str
+    reason: str
+    sessions: list[SportSession]
+    recent_mix: dict[str, float] = {}
+

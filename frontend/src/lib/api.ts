@@ -209,6 +209,28 @@ export const api = {
       "/v1/coaching/insights"
     ),
 
+  coachingSession: () =>
+    apiFetch<{
+      race_name: string;
+      race_date: string;
+      weeks_to_race: number;
+      phase: string;
+      recovery_score: number;
+      sleep_score: number | null;
+      hrv_status: string | null;
+      recommended_sport: "running" | "cycling" | "swimming" | string;
+      reason: string;
+      sessions: Array<{
+        sport: string;
+        title: string;
+        duration_min: number;
+        intensity: string;
+        description: string;
+        focus: string;
+      }>;
+      recent_mix: Record<string, number>;
+    }>("/v1/coaching/session"),
+
   updateSettings: (settings: Record<string, number | null>) =>
     apiFetch<{ ok: boolean }>("/v1/auth/settings", {
       method: "PUT",
