@@ -2,7 +2,6 @@
 
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -10,13 +9,9 @@ export function useEventStream() {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    const token = localStorage.getItem("jarvis_token");
-    if (!token) return;
-
     const controller = new AbortController();
 
     fetch(`${API_URL}/v1/events/stream`, {
-      headers: { Authorization: `Bearer ${token}` },
       signal: controller.signal,
     }).then(async (res) => {
       if (!res.ok || !res.body) return;

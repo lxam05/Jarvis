@@ -3,18 +3,15 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Activity,
   Apple,
   Brain,
   Dumbbell,
   Home,
-  LogOut,
   Moon,
   Scale,
   Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { clearToken } from "@/lib/api";
 
 const nav = [
   { href: "/", label: "Dashboard", icon: Home },
@@ -56,18 +53,6 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="border-t border-zinc-800/60 p-4">
-        <button
-          onClick={() => {
-            clearToken();
-            window.location.href = "/login";
-          }}
-          className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300"
-        >
-          <LogOut className="h-4 w-4" />
-          Sign out
-        </button>
-      </div>
     </aside>
   );
 }
