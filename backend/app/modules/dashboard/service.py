@@ -180,9 +180,27 @@ async def get_dashboard_today(db, user_id) -> DashboardTodayResponse:
     )
     today_list = today_acts.scalars().all()
     activity_burned = sum(a.calories or 0 for a in today_list)
-    # Prefer today's burned total; if today's summary isn't downloaded yet, use the
-    # same fallback day as sleep/steps (shown with garmin_metrics_as_of).
-    calories_burned = daily.calories_total if daily and daily.calories_total else activity_burned
+
+    def _calories_burned_from_daily(summary: GarminDailySummary | None) -> int | None:
+        if summary is None:
+            return None
+        if summary.calories_total is not None:
+            return int(summary.calories_total)
+        # Some synced rows only have BMR/active; derive total when possible.
+        if summary.calories_bmr is not None or summary.calories_active is not None:
+            return int(summary.calories_bmr or 0) + int(summary.calories_active or 0)
+        raw = summary.raw or {}
+        for key in ("calories_total", "caloriesTotal"):
+            if raw.get(key) not in (None, "None", ""):
+                try:
+                    return int(float(raw[key]))
+                except (TypeError, ValueError):
+                    pass
+        return None
+
+    calories_burned = _calories_burned_from_daily(daily)
+    if calories_burned is None:
+        calories_burned = activity_burned
 
     training = TrainingCard(
         activities_today=[_activity_dict(a) for a in today_list],
