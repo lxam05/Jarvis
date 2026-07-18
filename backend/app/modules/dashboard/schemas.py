@@ -70,6 +70,7 @@ class DashboardTodayResponse(BaseModel):
     recent_activities: list[dict] = Field(default_factory=list)
     insights: list[InsightCard] = Field(default_factory=list)
     last_garmin_sync: datetime | None = None
+    calories_burned: int = 0
 
 
 class WeightTrendPoint(BaseModel):

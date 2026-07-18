@@ -196,9 +196,10 @@ class SQLiteGarminSource:
                 if not start_at:
                     continue
                 distance = raw.get("distance")
+                activity_id = str(raw.get("activity_id"))
                 results.append(
                     ActivityDTO(
-                        garmin_activity_id=str(raw.get("activity_id")),
+                        garmin_activity_id=activity_id,
                         name=raw.get("name"),
                         sport=raw.get("sport"),
                         sub_sport=raw.get("sub_sport"),
@@ -211,12 +212,38 @@ class SQLiteGarminSource:
                         max_hr=raw.get("max_hr"),
                         training_load=Decimal(str(raw["training_load"])) if raw.get("training_load") else None,
                         training_effect=Decimal(str(raw["training_effect"])) if raw.get("training_effect") else None,
+                        route=self._fetch_route(conn, activity_id),
                         raw={k: str(v) if v is not None else None for k, v in raw.items()},
                     )
                 )
             return results
         finally:
             conn.close()
+
+    def _fetch_route(self, conn: sqlite3.Connection, activity_id: str) -> list[list[float]]:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT position_lat, position_long
+            FROM activity_records
+            WHERE activity_id = ?
+              AND position_lat IS NOT NULL
+              AND position_long IS NOT NULL
+            ORDER BY record ASC
+            """,
+            (activity_id,),
+        )
+        points = [[float(lat), float(lng)] for lat, lng in cur.fetchall()]
+        if not points:
+            return []
+        target = 400
+        if len(points) <= target:
+            return points
+        stride = max(1, len(points) // target)
+        downsampled = points[::stride]
+        if downsampled[-1] != points[-1]:
+            downsampled.append(points[-1])
+        return downsampled
 
     def fetch_weight(self, since: datetime | None) -> list[WeightDTO]:
         conn = self._connect(self.garmin_db_path)

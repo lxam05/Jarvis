@@ -64,6 +64,7 @@ class ActivityDTO(BaseModel):
     max_hr: int | None = None
     training_load: Decimal | None = None
     training_effect: Decimal | None = None
+    route: list[list[float]] = Field(default_factory=list)
     raw: dict[str, Any] | None = None
 
 

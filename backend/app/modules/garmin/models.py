@@ -110,6 +110,7 @@ class GarminActivity(Base):
     max_hr: Mapped[int | None] = mapped_column(Integer, nullable=True)
     training_load: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     training_effect: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    route: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     raw: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

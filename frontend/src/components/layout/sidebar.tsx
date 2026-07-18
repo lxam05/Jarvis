@@ -2,23 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  Apple,
-  Brain,
-  Dumbbell,
-  Home,
-  Moon,
-  Scale,
-  Settings,
-} from "lucide-react";
+import { Apple, Brain, Home, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const nav = [
   { href: "/", label: "Dashboard", icon: Home },
   { href: "/nutrition", label: "Nutrition", icon: Apple },
-  { href: "/training", label: "Training", icon: Dumbbell },
-  { href: "/recovery", label: "Recovery", icon: Moon },
-  { href: "/weight", label: "Weight", icon: Scale },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -26,7 +15,7 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-zinc-800/60 bg-zinc-950/95 backdrop-blur-xl">
+    <aside className="fixed inset-y-0 left-0 z-40 flex w-56 flex-col border-r border-zinc-800/60 bg-zinc-950/95 backdrop-blur-xl">
       <div className="flex h-16 items-center gap-2 border-b border-zinc-800/60 px-6">
         <Brain className="h-6 w-6 text-emerald-400" />
         <span className="text-lg font-semibold tracking-tight text-zinc-50">JARVIS</span>
@@ -34,7 +23,7 @@ export function Sidebar() {
 
       <nav className="flex-1 space-y-1 p-4">
         {nav.map(({ href, label, icon: Icon }) => {
-          const active = pathname === href;
+          const active = pathname === href || (href !== "/" && pathname.startsWith(href));
           return (
             <Link
               key={href}
@@ -52,7 +41,6 @@ export function Sidebar() {
           );
         })}
       </nav>
-
     </aside>
   );
 }
@@ -61,8 +49,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-[#09090b]">
       <Sidebar />
-      <main className="pl-64">
-        <div className="mx-auto max-w-7xl px-8 py-8">{children}</div>
+      <main className="pl-56">
+        <div className="mx-auto max-w-5xl px-6 py-8 md:px-8">{children}</div>
       </main>
     </div>
   );

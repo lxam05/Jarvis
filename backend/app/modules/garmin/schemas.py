@@ -64,6 +64,7 @@ class ActivityDTO(BaseModel):
     max_hr: int | None = None
     training_load: Decimal | None = None
     training_effect: Decimal | None = None
+    route: list[list[float]] = Field(default_factory=list)
     raw: dict[str, Any] | None = None
 
 
@@ -99,3 +100,25 @@ class GarminSyncStatusResponse(BaseModel):
     last_status: str | None
     records_upserted: dict[str, int] | None
     cursors: dict[str, datetime | None]
+
+
+class ActivityDetailResponse(BaseModel):
+    id: str
+    garmin_activity_id: str
+    name: str | None = None
+    sport: str | None = None
+    sub_sport: str | None = None
+    start_at: datetime
+    elapsed_seconds: int | None = None
+    moving_seconds: int | None = None
+    distance_m: float | None = None
+    calories: int | None = None
+    avg_hr: int | None = None
+    max_hr: int | None = None
+    training_load: float | None = None
+    training_effect: float | None = None
+    ascent_m: float | None = None
+    descent_m: float | None = None
+    avg_speed_mps: float | None = None
+    max_speed_mps: float | None = None
+    route: list[list[float]] = Field(default_factory=list)

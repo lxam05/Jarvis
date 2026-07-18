@@ -216,6 +216,7 @@ async def _upsert_activities(db: AsyncSession, user_id: uuid.UUID, batch: Garmin
             "max_hr": dto.max_hr,
             "training_load": dto.training_load,
             "training_effect": dto.training_effect,
+            "route": dto.route or None,
             "raw": dto.raw,
             "synced_at": datetime.now(UTC),
         }
@@ -227,6 +228,48 @@ async def _upsert_activities(db: AsyncSession, user_id: uuid.UUID, batch: Garmin
         await db.execute(stmt)
         count += 1
     return count
+
+
+async def get_activity(db: AsyncSession, user_id: uuid.UUID, activity_id: uuid.UUID) -> GarminActivity | None:
+    result = await db.execute(
+        select(GarminActivity).where(GarminActivity.id == activity_id, GarminActivity.user_id == user_id)
+    )
+    return result.scalar_one_or_none()
+
+
+def activity_to_detail(activity: GarminActivity) -> dict:
+    raw = activity.raw or {}
+
+    def _float(key: str) -> float | None:
+        val = raw.get(key)
+        if val is None or val == "None":
+            return None
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return None
+
+    return {
+        "id": str(activity.id),
+        "garmin_activity_id": activity.garmin_activity_id,
+        "name": activity.name,
+        "sport": activity.sport,
+        "sub_sport": activity.sub_sport,
+        "start_at": activity.start_at,
+        "elapsed_seconds": activity.elapsed_seconds,
+        "moving_seconds": activity.moving_seconds,
+        "distance_m": float(activity.distance_m) if activity.distance_m is not None else None,
+        "calories": activity.calories,
+        "avg_hr": activity.avg_hr,
+        "max_hr": activity.max_hr,
+        "training_load": float(activity.training_load) if activity.training_load is not None else None,
+        "training_effect": float(activity.training_effect) if activity.training_effect is not None else None,
+        "ascent_m": _float("ascent"),
+        "descent_m": _float("descent"),
+        "avg_speed_mps": _float("avg_speed"),
+        "max_speed_mps": _float("max_speed"),
+        "route": activity.route or [],
+    }
 
 
 async def _upsert_weight(db: AsyncSession, user_id: uuid.UUID, batch: GarminSyncBatch) -> int:

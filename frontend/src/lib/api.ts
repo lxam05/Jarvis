@@ -1,5 +1,37 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+export type ActivitySummary = {
+  id: string;
+  name: string | null;
+  sport: string | null;
+  start_at: string;
+  calories: number | null;
+  duration_seconds: number | null;
+  distance_m?: number | null;
+};
+
+export type ActivityDetail = {
+  id: string;
+  garmin_activity_id: string;
+  name: string | null;
+  sport: string | null;
+  sub_sport: string | null;
+  start_at: string;
+  elapsed_seconds: number | null;
+  moving_seconds: number | null;
+  distance_m: number | null;
+  calories: number | null;
+  avg_hr: number | null;
+  max_hr: number | null;
+  training_load: number | null;
+  training_effect: number | null;
+  ascent_m: number | null;
+  descent_m: number | null;
+  avg_speed_mps: number | null;
+  max_speed_mps: number | null;
+  route: [number, number][];
+};
+
 export type DashboardToday = {
   date: string;
   macros: {
@@ -29,14 +61,7 @@ export type DashboardToday = {
     recovery_score: number;
   };
   training: {
-    activities_today: Array<{
-      name: string | null;
-      sport: string | null;
-      start_at: string;
-      calories: number | null;
-      duration_seconds: number | null;
-      distance_m?: number | null;
-    }>;
+    activities_today: ActivitySummary[];
     weekly_load: number;
     weekly_activities: number;
     total_calories_burned_today: number;
@@ -48,15 +73,10 @@ export type DashboardToday = {
     step_goal: number | null;
     steps_today: number | null;
   };
-  recent_activities: Array<{
-    name: string | null;
-    sport: string | null;
-    start_at: string;
-    calories: number | null;
-    duration_seconds: number | null;
-  }>;
+  recent_activities: ActivitySummary[];
   insights: Array<{ title: string; body: string; category: string; severity: string }>;
   last_garmin_sync: string | null;
+  calories_burned: number;
 };
 
 export type Meal = {
@@ -135,6 +155,8 @@ export const api = {
     }),
 
   dashboardToday: () => apiFetch<DashboardToday>("/v1/dashboard/today"),
+
+  getActivity: (id: string) => apiFetch<ActivityDetail>(`/v1/garmin/activities/${id}`),
 
   weightTrend: (days = 30) =>
     apiFetch<{ points: Array<{ date: string; weight_kg: number }> }>(
