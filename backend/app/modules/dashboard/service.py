@@ -171,7 +171,7 @@ async def get_dashboard_today(db, user_id) -> DashboardTodayResponse:
         select(GarminActivity)
         .where(GarminActivity.user_id == user_id)
         .order_by(GarminActivity.start_at.desc())
-        .limit(5)
+        .limit(40)
     )
     recent_activities = [_activity_dict(a) for a in recent.scalars()]
 

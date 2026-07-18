@@ -10,7 +10,7 @@ function SyncBadge({ lastSync }: { lastSync: string | null }) {
   if (!lastSync) return null;
   const ago = Math.round((Date.now() - new Date(lastSync).getTime()) / 60000);
   return (
-    <span className="text-xs text-zinc-500">
+    <span className="font-mono text-[0.65rem] uppercase tracking-[0.12em] text-[var(--muted)]">
       Synced {ago < 60 ? `${ago}m ago` : `${Math.round(ago / 60)}h ago`}
     </span>
   );
@@ -30,16 +30,20 @@ function MetricTile({
   icon: React.ComponentType<{ className?: string }>;
 }) {
   return (
-    <div className="rounded-2xl border border-zinc-800/80 bg-zinc-950/80 p-5">
-      <div className="mb-3 flex items-center gap-2 text-zinc-500">
-        <Icon className="h-4 w-4" />
-        <span className="text-xs font-medium uppercase tracking-wide">{label}</span>
+    <div className="hud-panel hud-corners p-5">
+      <span className="hud-corner-tr" aria-hidden />
+      <span className="hud-corner-bl" aria-hidden />
+      <div className="mb-3 flex items-center gap-2 text-[var(--muted)]">
+        <Icon className="h-3.5 w-3.5 text-[var(--accent)]" />
+        <span className="hud-label">{label}</span>
       </div>
-      <p className="text-3xl font-semibold tracking-tight text-zinc-50 tabular-nums">
+      <p className="hud-metric text-3xl tracking-tight">
         {value}
-        {unit ? <span className="ml-1 text-base font-normal text-zinc-500">{unit}</span> : null}
+        {unit ? <span className="ml-1.5 text-base text-[var(--muted)]">{unit}</span> : null}
       </p>
-      {detail ? <p className="mt-2 text-sm text-zinc-500">{detail}</p> : null}
+      {detail ? (
+        <p className="mt-2 font-mono text-xs text-[var(--muted)]">{detail}</p>
+      ) : null}
     </div>
   );
 }
@@ -58,22 +62,31 @@ function formatDistance(meters: number | null | undefined) {
   return `${Math.round(meters)} m`;
 }
 
-function ActivityRow({ activity }: { activity: ActivitySummary }) {
+function ActivityRow({ activity, showDate = false }: { activity: ActivitySummary; showDate?: boolean }) {
   const distance = formatDistance(activity.distance_m);
+  const when = showDate
+    ? new Date(activity.start_at).toLocaleDateString("en-GB", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+      })
+    : new Date(activity.start_at).toLocaleTimeString("en-GB", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
   return (
     <Link
       href={`/activities/${activity.id}`}
-      className="group flex items-center justify-between gap-4 rounded-2xl border border-zinc-800/80 bg-zinc-950/80 px-5 py-4 transition-colors hover:border-emerald-500/40 hover:bg-zinc-900/80"
+      className="hud-panel hud-corners group flex items-center justify-between gap-4 px-5 py-4 transition-all hover:border-[rgba(0,212,255,0.5)] hover:bg-[rgba(0,212,255,0.06)]"
     >
+      <span className="hud-corner-tr" aria-hidden />
+      <span className="hud-corner-bl" aria-hidden />
       <div className="min-w-0">
-        <p className="truncate text-base font-medium text-zinc-100">
+        <p className="truncate font-mono text-sm tracking-wide text-[#e8fbff]">
           {activity.name || activity.sport || "Activity"}
         </p>
-        <p className="mt-1 text-sm text-zinc-500">
-          {new Date(activity.start_at).toLocaleTimeString("en-GB", {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
+        <p className="mt-1 font-mono text-xs text-[var(--muted)]">
+          {when}
           {" · "}
           {formatDuration(activity.duration_seconds)}
           {distance ? ` · ${distance}` : ""}
@@ -81,7 +94,7 @@ function ActivityRow({ activity }: { activity: ActivitySummary }) {
           {activity.calories ?? 0} kcal
         </p>
       </div>
-      <ChevronRight className="h-5 w-5 shrink-0 text-zinc-600 transition-colors group-hover:text-emerald-400" />
+      <ChevronRight className="h-5 w-5 shrink-0 text-[var(--muted)] transition-colors group-hover:text-[var(--accent)]" />
     </Link>
   );
 }
@@ -96,14 +109,14 @@ export default function DashboardPage() {
   if (isLoading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
+        <div className="hud-spinner" />
       </div>
     );
   }
 
   if (error || !data) {
     return (
-      <div className="rounded-2xl border border-red-500/30 bg-red-500/5 p-6 text-red-400">
+      <div className="hud-panel border-[rgba(255,77,109,0.4)] p-6 font-mono text-sm text-[var(--danger)]">
         Failed to load dashboard. Is the API running?
       </div>
     );
@@ -115,12 +128,28 @@ export default function DashboardPage() {
   const consumed = data.macros.calories;
   const burned = data.calories_burned;
 
+  const todayIds = new Set(data.training.activities_today.map((a) => a.id));
+  const now = new Date();
+  const day = now.getDay(); // 0 Sun … 6 Sat
+  const weekStart = new Date(now);
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(weekStart.getDate() - ((day + 6) % 7)); // Monday start
+
+  const thisWeek: ActivitySummary[] = [];
+  const previous: ActivitySummary[] = [];
+  for (const activity of data.recent_activities) {
+    if (todayIds.has(activity.id)) continue;
+    const start = new Date(activity.start_at);
+    if (start >= weekStart) thisWeek.push(activity);
+    else previous.push(activity);
+  }
+
   return (
     <div>
       <div className="mb-8 flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">Today</h1>
-          <p className="mt-1 text-sm text-zinc-500">
+          <h1 className="hud-title text-xl">Today</h1>
+          <p className="mt-2 font-mono text-xs uppercase tracking-[0.12em] text-[var(--muted)]">
             {new Date(data.date).toLocaleDateString("en-GB", {
               weekday: "long",
               month: "long",
@@ -160,11 +189,9 @@ export default function DashboardPage() {
       </motion.div>
 
       <section className="mt-10">
-        <h2 className="mb-4 text-sm font-medium uppercase tracking-wide text-zinc-500">
-          Today&apos;s activities
-        </h2>
+        <h2 className="hud-label mb-4">Today&apos;s activities</h2>
         {data.training.activities_today.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-zinc-800 px-5 py-10 text-center text-sm text-zinc-500">
+          <div className="hud-panel border-dashed px-5 py-10 text-center font-mono text-sm text-[var(--muted)]">
             No activities yet today
           </div>
         ) : (
@@ -176,13 +203,22 @@ export default function DashboardPage() {
         )}
       </section>
 
-      {data.recent_activities.length > 0 && data.training.activities_today.length === 0 ? (
+      {thisWeek.length > 0 ? (
         <section className="mt-10">
-          <h2 className="mb-4 text-sm font-medium uppercase tracking-wide text-zinc-500">
-            Recent activities
-          </h2>
+          <h2 className="hud-label mb-4">This week</h2>
           <div className="space-y-3">
-            {data.recent_activities.map((activity) => (
+            {thisWeek.map((activity) => (
+              <ActivityRow key={activity.id} activity={activity} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {previous.length > 0 ? (
+        <section className="mt-10">
+          <h2 className="hud-label mb-4">Previous</h2>
+          <div className="space-y-3">
+            {previous.map((activity) => (
               <ActivityRow key={activity.id} activity={activity} />
             ))}
           </div>
