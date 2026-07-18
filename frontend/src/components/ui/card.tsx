@@ -10,18 +10,14 @@ interface CardProps {
 
 export function Card({ children, className, title, subtitle, action }: CardProps) {
   return (
-    <div
-      className={cn(
-        "rounded-2xl border border-zinc-800/60 bg-zinc-950/80 p-5 backdrop-blur-sm",
-        "shadow-[inset_0_1px_0_0_rgba(255,255,255,0.03)]",
-        className
-      )}
-    >
+    <div className={cn("hud-panel hud-corners p-5", className)}>
+      <span className="hud-corner-tr" aria-hidden />
+      <span className="hud-corner-bl" aria-hidden />
       {(title || action) && (
         <div className="mb-4 flex items-start justify-between gap-2">
           <div>
-            {title && <h3 className="text-sm font-medium text-zinc-400">{title}</h3>}
-            {subtitle && <p className="mt-0.5 text-xs text-zinc-600">{subtitle}</p>}
+            {title && <h3 className="hud-label">{title}</h3>}
+            {subtitle && <p className="mt-1 font-mono text-xs text-[var(--muted)]">{subtitle}</p>}
           </div>
           {action}
         </div>
@@ -41,11 +37,9 @@ export function MetricValue({
   className?: string;
 }) {
   return (
-    <div className={cn("flex items-baseline gap-1", className)}>
-      <span className="text-3xl font-semibold tabular-nums tracking-tight text-zinc-50">
-        {value}
-      </span>
-      {unit && <span className="text-sm text-zinc-500">{unit}</span>}
+    <div className={cn("flex items-baseline gap-1.5", className)}>
+      <span className="hud-metric text-3xl font-normal tracking-tight">{value}</span>
+      {unit && <span className="font-mono text-sm text-[var(--muted)]">{unit}</span>}
     </div>
   );
 }

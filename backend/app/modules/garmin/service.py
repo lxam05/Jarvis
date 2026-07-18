@@ -237,6 +237,26 @@ async def get_activity(db: AsyncSession, user_id: uuid.UUID, activity_id: uuid.U
     return result.scalar_one_or_none()
 
 
+async def list_activities(db: AsyncSession, user_id: uuid.UUID, limit: int = 60) -> list[dict]:
+    result = await db.execute(
+        select(GarminActivity)
+        .where(GarminActivity.user_id == user_id)
+        .order_by(GarminActivity.start_at.desc())
+        .limit(limit)
+    )
+    return [
+        {
+            "id": str(a.id),
+            "name": a.name,
+            "sport": a.sport,
+            "start_at": a.start_at.isoformat(),
+            "calories": a.calories,
+            "duration_seconds": a.elapsed_seconds,
+            "distance_m": float(a.distance_m) if a.distance_m is not None else None,
+        }
+        for a in result.scalars()
+    ]
+
 def activity_to_detail(activity: GarminActivity) -> dict:
     raw = activity.raw or {}
 

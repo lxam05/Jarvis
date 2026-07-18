@@ -15,15 +15,17 @@ export default function RecoveryPage() {
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-semibold tracking-tight">Recovery</h1>
+      <h1 className="hud-title mb-6 text-xl">Recovery</h1>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <Card title="Sleep Score">
           <MetricValue value={r.sleep_score ?? "—"} />
-          {r.sleep_hours && <p className="mt-2 text-sm text-zinc-500">{r.sleep_hours} hours</p>}
+          {r.sleep_hours && (
+            <p className="mt-2 font-mono text-sm text-[var(--muted)]">{r.sleep_hours} hours</p>
+          )}
         </Card>
         <Card title="HRV">
           <MetricValue value={r.hrv_ms ?? "—"} unit="ms" />
-          <p className="mt-2 text-sm text-zinc-500">{r.hrv_status ?? "No data"}</p>
+          <p className="mt-2 font-mono text-sm text-[var(--muted)]">{r.hrv_status ?? "No data"}</p>
         </Card>
         <Card title="Body Battery">
           <MetricValue value={r.body_battery_min ?? "—"} unit={`– ${r.body_battery_max ?? "—"}`} />
@@ -33,9 +35,9 @@ export default function RecoveryPage() {
         </Card>
         <Card title="Recovery Score">
           <MetricValue value={r.recovery_score.toFixed(0)} unit="/ 100" />
-          <div className="mt-4 h-2 overflow-hidden rounded-full bg-zinc-800">
+          <div className="mt-4 h-1.5 overflow-hidden bg-[rgba(0,212,255,0.12)]">
             <div
-              className="h-full rounded-full bg-gradient-to-r from-red-500 via-amber-500 to-emerald-500"
+              className="h-full bg-gradient-to-r from-[var(--danger)] via-amber-400 to-[var(--accent)] shadow-[0_0_8px_rgba(0,212,255,0.4)]"
               style={{ width: `${r.recovery_score}%` }}
             />
           </div>

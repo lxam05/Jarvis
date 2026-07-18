@@ -86,3 +86,16 @@ class WeightTrendResponse(BaseModel):
 
 class WeeklyTrainingResponse(BaseModel):
     days: list[dict]
+
+
+class WeeklySportDistancePoint(BaseModel):
+    week_start: date
+    label: str
+    running_km: float = 0
+    cycling_km: float = 0
+    swimming_km: float = 0
+
+
+class WeeklySportDistanceResponse(BaseModel):
+    weeks: list[WeeklySportDistancePoint]
+

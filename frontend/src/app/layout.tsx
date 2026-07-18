@@ -1,16 +1,18 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Orbitron, Share_Tech_Mono } from "next/font/google";
 import { Providers } from "@/components/providers";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const hudSans = Orbitron({
+  variable: "--font-hud-sans",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const hudMono = Share_Tech_Mono({
+  variable: "--font-hud-mono",
   subsets: ["latin"],
+  weight: "400",
 });
 
 export const metadata: Metadata = {
@@ -24,8 +26,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}>
-      <body className="min-h-full bg-[#09090b] text-zinc-50">
+    <html lang="en" className={`${hudSans.variable} ${hudMono.variable} dark h-full antialiased`}>
+      <body className="min-h-full bg-[#02060c] text-[#e0f7ff]">
         <Providers>{children}</Providers>
       </body>
     </html>

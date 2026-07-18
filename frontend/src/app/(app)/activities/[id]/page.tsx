@@ -12,7 +12,7 @@ const ActivityMap = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex h-[360px] items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-950 text-sm text-zinc-500">
+      <div className="hud-panel flex h-[360px] items-center justify-center font-mono text-sm text-[var(--muted)]">
         Loading map…
       </div>
     ),
@@ -21,9 +21,11 @@ const ActivityMap = dynamic(
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-zinc-800/80 bg-zinc-950/80 p-4">
-      <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</p>
-      <p className="mt-2 text-xl font-semibold tabular-nums text-zinc-50">{value}</p>
+    <div className="hud-panel hud-corners p-4">
+      <span className="hud-corner-tr" aria-hidden />
+      <span className="hud-corner-bl" aria-hidden />
+      <p className="hud-label">{label}</p>
+      <p className="hud-metric mt-2 text-xl tracking-tight">{value}</p>
     </div>
   );
 }
@@ -67,7 +69,7 @@ export default function ActivityDetailPage() {
   if (isLoading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-500 border-t-transparent" />
+        <div className="hud-spinner" />
       </div>
     );
   }
@@ -75,10 +77,13 @@ export default function ActivityDetailPage() {
   if (error || !data) {
     return (
       <div>
-        <Link href="/" className="mb-6 inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-300">
+        <Link
+          href="/"
+          className="mb-6 inline-flex items-center gap-2 font-mono text-xs uppercase tracking-[0.12em] text-[var(--muted)] hover:text-[var(--accent)]"
+        >
           <ArrowLeft className="h-4 w-4" /> Back
         </Link>
-        <div className="rounded-2xl border border-red-500/30 bg-red-500/5 p-6 text-red-400">
+        <div className="hud-panel border-[rgba(255,77,109,0.4)] p-6 font-mono text-sm text-[var(--danger)]">
           Activity not found
         </div>
       </div>
@@ -91,16 +96,17 @@ export default function ActivityDetailPage() {
 
   return (
     <div>
-      <Link href="/" className="mb-6 inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-300">
+      <Link
+        href="/"
+        className="mb-6 inline-flex items-center gap-2 font-mono text-xs uppercase tracking-[0.12em] text-[var(--muted)] hover:text-[var(--accent)]"
+      >
         <ArrowLeft className="h-4 w-4" /> Today
       </Link>
 
       <div className="mb-6">
-        <p className="text-sm capitalize text-zinc-500">{data.sport || "Activity"}</p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-50">
-          {data.name || data.sport || "Activity"}
-        </h1>
-        <p className="mt-2 text-sm text-zinc-500">
+        <p className="hud-label">{data.sport || "Activity"}</p>
+        <h1 className="hud-title mt-2 text-xl">{data.name || data.sport || "Activity"}</h1>
+        <p className="mt-2 font-mono text-xs text-[var(--muted)]">
           {new Date(data.start_at).toLocaleString("en-GB", {
             weekday: "long",
             day: "numeric",

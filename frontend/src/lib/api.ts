@@ -159,6 +159,9 @@ export const api = {
 
   getActivity: (id: string) => apiFetch<ActivityDetail>(`/v1/garmin/activities/${id}`),
 
+  listActivities: (limit = 60) =>
+    apiFetch<ActivitySummary[]>(`/v1/garmin/activities?limit=${limit}`),
+
   weightTrend: (days = 30) =>
     apiFetch<{ points: Array<{ date: string; weight_kg: number }> }>(
       `/v1/dashboard/weight-trend?days=${days}`
@@ -168,6 +171,17 @@ export const api = {
     apiFetch<{ days: Array<{ date: string; activities: number; calories: number }> }>(
       "/v1/dashboard/training/week"
     ),
+
+  weeklySportDistance: (weeks = 8) =>
+    apiFetch<{
+      weeks: Array<{
+        week_start: string;
+        label: string;
+        running_km: number;
+        cycling_km: number;
+        swimming_km: number;
+      }>;
+    }>(`/v1/dashboard/training/weekly-distance?weeks=${weeks}`),
 
   syncStatus: () =>
     apiFetch<{

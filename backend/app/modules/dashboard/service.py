@@ -14,6 +14,8 @@ from app.modules.dashboard.schemas import (
     RecoveryCard,
     StreakCard,
     TrainingCard,
+    WeeklySportDistancePoint,
+    WeeklySportDistanceResponse,
     WeeklyTrainingResponse,
     WeightCard,
     WeightTrendPoint,
@@ -292,6 +294,56 @@ async def get_weekly_training(db: AsyncSession, user_id) -> WeeklyTrainingRespon
         row = result.one()
         days_data.append({"date": d.isoformat(), "activities": int(row[0]), "calories": int(row[1])})
     return WeeklyTrainingResponse(days=days_data)
+
+
+def _monday_on_or_before(d: date) -> date:
+    return d - timedelta(days=(d.weekday()))  # Monday=0
+
+
+async def get_weekly_sport_distance(
+    db: AsyncSession, user_id, weeks: int = 8
+) -> WeeklySportDistanceResponse:
+    today = date.today()
+    this_monday = _monday_on_or_before(today)
+    range_start = this_monday - timedelta(weeks=weeks - 1)
+    start_dt = datetime.combine(range_start, datetime.min.time(), tzinfo=UTC)
+    end_dt = datetime.combine(this_monday + timedelta(days=7), datetime.min.time(), tzinfo=UTC)
+
+    result = await db.execute(
+        select(GarminActivity.sport, GarminActivity.start_at, GarminActivity.distance_m).where(
+            GarminActivity.user_id == user_id,
+            GarminActivity.start_at >= start_dt,
+            GarminActivity.start_at < end_dt,
+        )
+    )
+
+    buckets: dict[date, dict[str, float]] = {
+        this_monday - timedelta(weeks=i): {"running": 0.0, "cycling": 0.0, "swimming": 0.0}
+        for i in range(weeks - 1, -1, -1)
+    }
+
+    for sport, start_at, distance_m in result.all():
+        if distance_m is None:
+            continue
+        sport_key = (sport or "").lower().strip()
+        if sport_key not in ("running", "cycling", "swimming"):
+            continue
+        week_start = _monday_on_or_before(start_at.astimezone(UTC).date())
+        if week_start not in buckets:
+            continue
+        buckets[week_start][sport_key] += float(distance_m) / 1000.0
+
+    points = [
+        WeeklySportDistancePoint(
+            week_start=week_start,
+            label=week_start.strftime("%d %b"),
+            running_km=round(vals["running"], 2),
+            cycling_km=round(vals["cycling"], 2),
+            swimming_km=round(vals["swimming"], 2),
+        )
+        for week_start, vals in buckets.items()
+    ]
+    return WeeklySportDistanceResponse(weeks=points)
 
 
 async def _meal_logging_streak(db: AsyncSession, user_id) -> int:

@@ -1,10 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { ChevronRight, Flame, Footprints, Moon } from "lucide-react";
-import { api, type ActivitySummary } from "@/lib/api";
+import { Flame, Footprints, Moon } from "lucide-react";
+import { api } from "@/lib/api";
 
 function SyncBadge({ lastSync }: { lastSync: string | null }) {
   if (!lastSync) return null;
@@ -48,57 +47,6 @@ function MetricTile({
   );
 }
 
-function formatDuration(seconds: number | null | undefined) {
-  if (!seconds) return "—";
-  const m = Math.round(seconds / 60);
-  if (m < 60) return `${m} min`;
-  const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m`;
-}
-
-function formatDistance(meters: number | null | undefined) {
-  if (meters == null) return null;
-  if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`;
-  return `${Math.round(meters)} m`;
-}
-
-function ActivityRow({ activity, showDate = false }: { activity: ActivitySummary; showDate?: boolean }) {
-  const distance = formatDistance(activity.distance_m);
-  const when = showDate
-    ? new Date(activity.start_at).toLocaleDateString("en-GB", {
-        weekday: "short",
-        day: "numeric",
-        month: "short",
-      })
-    : new Date(activity.start_at).toLocaleTimeString("en-GB", {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-  return (
-    <Link
-      href={`/activities/${activity.id}`}
-      className="hud-panel hud-corners group flex items-center justify-between gap-4 px-5 py-4 transition-all hover:border-[rgba(0,212,255,0.5)] hover:bg-[rgba(0,212,255,0.06)]"
-    >
-      <span className="hud-corner-tr" aria-hidden />
-      <span className="hud-corner-bl" aria-hidden />
-      <div className="min-w-0">
-        <p className="truncate font-mono text-sm tracking-wide text-[#e8fbff]">
-          {activity.name || activity.sport || "Activity"}
-        </p>
-        <p className="mt-1 font-mono text-xs text-[var(--muted)]">
-          {when}
-          {" · "}
-          {formatDuration(activity.duration_seconds)}
-          {distance ? ` · ${distance}` : ""}
-          {" · "}
-          {activity.calories ?? 0} kcal
-        </p>
-      </div>
-      <ChevronRight className="h-5 w-5 shrink-0 text-[var(--muted)] transition-colors group-hover:text-[var(--accent)]" />
-    </Link>
-  );
-}
-
 export default function DashboardPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["dashboard", "today"],
@@ -134,22 +82,6 @@ export default function DashboardPage() {
         month: "short",
       })
     : null;
-
-  const todayIds = new Set(data.training.activities_today.map((a) => a.id));
-  const now = new Date();
-  const day = now.getDay(); // 0 Sun … 6 Sat
-  const weekStart = new Date(now);
-  weekStart.setHours(0, 0, 0, 0);
-  weekStart.setDate(weekStart.getDate() - ((day + 6) % 7)); // Monday start
-
-  const thisWeek: ActivitySummary[] = [];
-  const previous: ActivitySummary[] = [];
-  for (const activity of data.recent_activities) {
-    if (todayIds.has(activity.id)) continue;
-    const start = new Date(activity.start_at);
-    if (start >= weekStart) thisWeek.push(activity);
-    else previous.push(activity);
-  }
 
   return (
     <div>
@@ -205,52 +137,12 @@ export default function DashboardPage() {
           icon={Flame}
           value={`${consumed.toLocaleString()} / ${burned.toLocaleString()}`}
           detail={
-            [
-              "Consumed vs burned",
-              asOf ? `Burned as of ${asOf}` : null,
-            ]
+            ["Consumed vs burned", asOf ? `Burned as of ${asOf}` : null]
               .filter(Boolean)
               .join(" · ")
           }
         />
       </motion.div>
-
-      <section className="mt-10">
-        <h2 className="hud-label mb-4">Today&apos;s activities</h2>
-        {data.training.activities_today.length === 0 ? (
-          <div className="hud-panel border-dashed px-5 py-10 text-center font-mono text-sm text-[var(--muted)]">
-            No activities yet today
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {data.training.activities_today.map((activity) => (
-              <ActivityRow key={activity.id} activity={activity} />
-            ))}
-          </div>
-        )}
-      </section>
-
-      {thisWeek.length > 0 ? (
-        <section className="mt-10">
-          <h2 className="hud-label mb-4">This week</h2>
-          <div className="space-y-3">
-            {thisWeek.map((activity) => (
-              <ActivityRow key={activity.id} activity={activity} showDate />
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      {previous.length > 0 ? (
-        <section className="mt-10">
-          <h2 className="hud-label mb-4">Previous</h2>
-          <div className="space-y-3">
-            {previous.map((activity) => (
-              <ActivityRow key={activity.id} activity={activity} showDate />
-            ))}
-          </div>
-        </section>
-      ) : null}
     </div>
   );
 }

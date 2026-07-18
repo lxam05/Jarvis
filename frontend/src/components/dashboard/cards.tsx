@@ -5,7 +5,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 import { Card, MetricValue } from "@/components/ui/card";
 import type { DashboardToday } from "@/lib/api";
 
-const COLORS = ["#34d399", "#60a5fa", "#fbbf24"];
+const COLORS = ["#00d4ff", "#5ce1ff", "#fbbf24"];
 
 export function CaloriesCard({ data }: { data: DashboardToday["macros"] }) {
   const goal = data.calorie_goal || 2500;
@@ -14,9 +14,9 @@ export function CaloriesCard({ data }: { data: DashboardToday["macros"] }) {
   return (
     <Card title="Today's Calories" subtitle={`Goal: ${goal.toLocaleString()} kcal`}>
       <MetricValue value={data.calories.toLocaleString()} unit="kcal" />
-      <div className="mt-4 h-2 overflow-hidden rounded-full bg-zinc-800">
+      <div className="mt-4 h-1.5 overflow-hidden bg-[rgba(0,212,255,0.12)]">
         <motion.div
-          className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400"
+          className="h-full bg-gradient-to-r from-[var(--accent-dim)] to-[var(--accent)] shadow-[0_0_8px_rgba(0,212,255,0.4)]"
           initial={{ width: 0 }}
           animate={{ width: `${pct}%` }}
           transition={{ duration: 0.8, ease: "easeOut" }}
@@ -49,9 +49,9 @@ export function MacrosCard({ data }: { data: DashboardToday["macros"] }) {
         </div>
         <div className="space-y-2 text-sm">
           <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-emerald-400" />
-            <span className="text-zinc-400">Protein</span>
-            <span className="ml-auto tabular-nums text-zinc-200">{data.protein_g.toFixed(0)}g</span>
+            <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />
+            <span className="text-[var(--muted)]">Protein</span>
+            <span className="ml-auto tabular-nums text-[#e8fbff]">{data.protein_g.toFixed(0)}g</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-blue-400" />
@@ -106,7 +106,7 @@ export function WeightCard({ data }: { data: DashboardToday["weight"] }) {
       />
       {data.weekly_change_kg !== null && (
         <p
-          className={`mt-2 text-sm ${data.weekly_change_kg <= 0 ? "text-emerald-400" : "text-amber-400"}`}
+          className={`mt-2 font-mono text-sm ${data.weekly_change_kg <= 0 ? "text-[var(--accent)]" : "text-amber-400"}`}
         >
           {data.weekly_change_kg > 0 ? "+" : ""}
           {data.weekly_change_kg} kg this week
@@ -121,7 +121,7 @@ export function WeightCard({ data }: { data: DashboardToday["weight"] }) {
             return (
               <motion.div
                 key={i}
-                className="flex-1 rounded-sm bg-emerald-500/40"
+                className="flex-1 bg-[rgba(0,212,255,0.4)]"
                 initial={{ height: 0 }}
                 animate={{ height: `${Math.max(10, h)}%` }}
                 transition={{ delay: i * 0.05 }}
@@ -216,9 +216,9 @@ export function GoalsCard({ data }: { data: DashboardToday["goals"] }) {
             {data.steps_today?.toLocaleString() ?? "—"} / {data.step_goal?.toLocaleString() ?? "—"}
           </span>
         </div>
-        <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800">
+        <div className="h-1.5 overflow-hidden bg-[rgba(0,212,255,0.12)]">
           <div
-            className="h-full rounded-full bg-blue-500"
+            className="h-full bg-[var(--accent)] shadow-[0_0_8px_rgba(0,212,255,0.4)]"
             style={{ width: `${stepPct}%` }}
           />
         </div>
@@ -229,9 +229,9 @@ export function GoalsCard({ data }: { data: DashboardToday["goals"] }) {
 
 export function InsightsCard({ insights }: { insights: DashboardToday["insights"] }) {
   const severityColor: Record<string, string> = {
-    info: "border-zinc-700",
+    info: "border-[rgba(0,212,255,0.35)]",
     warning: "border-amber-500/50",
-    critical: "border-red-500/50",
+    critical: "border-[var(--danger)]",
   };
 
   return (
@@ -246,10 +246,10 @@ export function InsightsCard({ insights }: { insights: DashboardToday["insights"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.1 }}
-              className={`rounded-xl border-l-2 bg-zinc-900/50 p-4 ${severityColor[insight.severity] || severityColor.info}`}
+              className={`border-l-2 bg-[rgba(0,30,50,0.4)] p-4 ${severityColor[insight.severity] || severityColor.info}`}
             >
-              <p className="font-medium text-zinc-200">{insight.title}</p>
-              <p className="mt-1 text-sm text-zinc-400">{insight.body}</p>
+              <p className="font-mono text-sm text-[#e8fbff]">{insight.title}</p>
+              <p className="mt-1 font-mono text-xs text-[var(--muted)]">{insight.body}</p>
             </motion.div>
           ))}
         </div>
@@ -294,7 +294,7 @@ export function SyncBadge({ lastSync }: { lastSync: string | null }) {
   if (!lastSync) return null;
   const ago = Math.round((Date.now() - new Date(lastSync).getTime()) / 60000);
   return (
-    <span className="rounded-full bg-zinc-800 px-3 py-1 text-xs text-zinc-400">
+    <span className="border border-[rgba(0,212,255,0.25)] bg-[rgba(0,212,255,0.08)] px-3 py-1 font-mono text-[0.65rem] uppercase tracking-[0.12em] text-[var(--muted)]">
       Synced {ago < 60 ? `${ago}m ago` : `${Math.round(ago / 60)}h ago`}
     </span>
   );

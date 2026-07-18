@@ -5,6 +5,15 @@ import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "rec
 import { Card, MetricValue } from "@/components/ui/card";
 import { api } from "@/lib/api";
 
+const CHART_STROKE = "#4a7a90";
+const TOOLTIP_STYLE = {
+  background: "rgba(2, 16, 28, 0.95)",
+  border: "1px solid rgba(0, 212, 255, 0.35)",
+  color: "#e0f7ff",
+  fontFamily: "var(--font-hud-mono)",
+  fontSize: 12,
+};
+
 export default function WeightPage() {
   const { data: trend } = useQuery({
     queryKey: ["weight", "trend"],
@@ -18,7 +27,7 @@ export default function WeightPage() {
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-semibold tracking-tight">Weight</h1>
+      <h1 className="hud-title mb-6 text-xl">Weight</h1>
       <div className="mb-6 grid gap-4 md:grid-cols-3">
         <Card title="Current">
           <MetricValue value={dashboard?.weight.current_kg?.toFixed(1) ?? "—"} unit="kg" />
@@ -45,22 +54,30 @@ export default function WeightPage() {
               <AreaChart data={trend.points}>
                 <defs>
                   <linearGradient id="weightGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#34d399" stopOpacity={0.3} />
-                    <stop offset="100%" stopColor="#34d399" stopOpacity={0} />
+                    <stop offset="0%" stopColor="#00d4ff" stopOpacity={0.35} />
+                    <stop offset="100%" stopColor="#00d4ff" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <XAxis
                   dataKey="date"
-                  tickFormatter={(d) => new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
-                  stroke="#71717a"
-                  fontSize={12}
+                  tickFormatter={(d) =>
+                    new Date(d).toLocaleDateString("en-GB", { day: "numeric", month: "short" })
+                  }
+                  stroke={CHART_STROKE}
+                  fontSize={11}
+                  fontFamily="var(--font-hud-mono)"
                 />
-                <YAxis domain={["auto", "auto"]} stroke="#71717a" fontSize={12} />
-                <Tooltip contentStyle={{ background: "#18181b", border: "1px solid #27272a" }} />
+                <YAxis
+                  domain={["auto", "auto"]}
+                  stroke={CHART_STROKE}
+                  fontSize={11}
+                  fontFamily="var(--font-hud-mono)"
+                />
+                <Tooltip contentStyle={TOOLTIP_STYLE} />
                 <Area
                   type="monotone"
                   dataKey="weight_kg"
-                  stroke="#34d399"
+                  stroke="#00d4ff"
                   fill="url(#weightGrad)"
                   strokeWidth={2}
                 />
@@ -68,7 +85,7 @@ export default function WeightPage() {
             </ResponsiveContainer>
           )}
           {trend && trend.points.length === 0 && (
-            <p className="text-sm text-zinc-500">No weight data yet</p>
+            <p className="font-mono text-sm text-[var(--muted)]">No weight data yet</p>
           )}
         </div>
       </Card>
