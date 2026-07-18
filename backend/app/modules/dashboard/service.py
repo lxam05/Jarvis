@@ -180,19 +180,9 @@ async def get_dashboard_today(db, user_id) -> DashboardTodayResponse:
     )
     today_list = today_acts.scalars().all()
     activity_burned = sum(a.calories or 0 for a in today_list)
-    # Burned calories: prefer today's daily total; if missing, use today's activities only
-    # (don't use a prior day's calorie total as "today burned").
-    today_daily_result = await db.execute(
-        select(GarminDailySummary).where(
-            GarminDailySummary.user_id == user_id, GarminDailySummary.day == today
-        )
-    )
-    today_daily = today_daily_result.scalar_one_or_none()
-    calories_burned = (
-        today_daily.calories_total
-        if today_daily and today_daily.calories_total
-        else activity_burned
-    )
+    # Prefer today's burned total; if today's summary isn't downloaded yet, use the
+    # same fallback day as sleep/steps (shown with garmin_metrics_as_of).
+    calories_burned = daily.calories_total if daily and daily.calories_total else activity_burned
 
     training = TrainingCard(
         activities_today=[_activity_dict(a) for a in today_list],

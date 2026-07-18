@@ -204,7 +204,14 @@ export default function DashboardPage() {
           label="Calories"
           icon={Flame}
           value={`${consumed.toLocaleString()} / ${burned.toLocaleString()}`}
-          detail="Consumed vs burned"
+          detail={
+            [
+              "Consumed vs burned",
+              asOf ? `Burned as of ${asOf}` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")
+          }
         />
       </motion.div>
 
