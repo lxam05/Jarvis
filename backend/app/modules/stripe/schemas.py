@@ -47,3 +47,14 @@ class StripeOverviewResponse(BaseModel):
     recent_payouts: list[StripePayoutItem] = Field(default_factory=list)
     recap: str = ""
     dashboard_url: str = "https://dashboard.stripe.com"
+
+
+class RailwayLogLine(BaseModel):
+    timestamp: datetime | None = None
+    message: str
+    severity: str | None = None
+
+
+class RailwayLogsResponse(BaseModel):
+    lines: list[RailwayLogLine] = Field(default_factory=list)
+    source: str = "railway"

@@ -1,9 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, ScrollText } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 function formatMoney(amount: number, currency: string, compact = false) {
   try {
@@ -40,11 +42,27 @@ function MetricCard({
 }
 
 export default function BusinessPage() {
+  const [showLogs, setShowLogs] = useState(false);
+
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["stripe", "overview"],
     queryFn: () => api.stripeOverview(),
     retry: false,
     refetchInterval: 120_000,
+  });
+
+  const {
+    data: logs,
+    isLoading: logsLoading,
+    isError: logsError,
+    error: logsErr,
+    refetch: refetchLogs,
+    isFetching: logsFetching,
+  } = useQuery({
+    queryKey: ["stripe", "runtime-logs"],
+    queryFn: () => api.stripeRuntimeLogs(100),
+    enabled: showLogs,
+    retry: false,
   });
 
   if (isLoading) {
@@ -82,6 +100,10 @@ export default function BusinessPage() {
   }
 
   const cur = data.currency;
+  const logsNeedConfig =
+    logsError &&
+    logsErr instanceof Error &&
+    (logsErr.message.includes("RAILWAY") || logsErr.message.includes("503"));
 
   return (
     <div>
@@ -92,7 +114,18 @@ export default function BusinessPage() {
             Stripe · live overview
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setShowLogs((v) => !v)}
+            className={cn(
+              "hud-btn inline-flex items-center gap-2 px-3 py-1.5 text-[0.65rem]",
+              showLogs && "border-[rgba(0,212,255,0.55)] text-[var(--accent)]"
+            )}
+          >
+            <ScrollText className="h-3.5 w-3.5" />
+            {showLogs ? "Hide logs" : "Logs"}
+          </button>
           <button
             type="button"
             onClick={() => refetch()}
@@ -111,6 +144,67 @@ export default function BusinessPage() {
           </a>
         </div>
       </div>
+
+      {showLogs ? (
+        <Card
+          className="mb-8"
+          title="Runtime logs"
+          subtitle="Railway · API service"
+          action={
+            <button
+              type="button"
+              onClick={() => refetchLogs()}
+              disabled={logsFetching}
+              className="hud-btn px-2.5 py-1 text-[0.6rem]"
+            >
+              {logsFetching ? "…" : "Reload"}
+            </button>
+          }
+        >
+          {logsLoading ? (
+            <div className="flex h-40 items-center justify-center">
+              <div className="hud-spinner" />
+            </div>
+          ) : logsNeedConfig ? (
+            <div className="space-y-2 font-mono text-sm text-[var(--muted)]">
+              <p>Railway logs not configured on the API.</p>
+              <p className="text-xs leading-relaxed">
+                Add <span className="text-[#c8f0ff]">RAILWAY_TOKEN</span> (account token from
+                railway.com/account/tokens). On Railway,{" "}
+                <span className="text-[#c8f0ff]">RAILWAY_ENVIRONMENT_ID</span> /{" "}
+                <span className="text-[#c8f0ff]">RAILWAY_SERVICE_ID</span> are usually injected
+                automatically — if not, set them from the linked CLI project.
+              </p>
+            </div>
+          ) : logsError ? (
+            <p className="font-mono text-sm text-[var(--danger)]">
+              {logsErr instanceof Error ? logsErr.message.slice(0, 240) : "Failed to load logs"}
+            </p>
+          ) : !logs?.lines.length ? (
+            <p className="font-mono text-sm text-[var(--muted)]">No log lines returned</p>
+          ) : (
+            <div className="max-h-[420px] overflow-y-auto border border-[rgba(0,212,255,0.15)] bg-[rgba(0,8,16,0.65)] p-3 font-mono text-[0.7rem] leading-relaxed text-[#9ecfe0]">
+              {logs.lines.map((line, i) => (
+                <div key={`${line.timestamp}-${i}`} className="whitespace-pre-wrap break-all">
+                  {line.timestamp ? (
+                    <span className="text-[var(--muted)]">
+                      {new Date(line.timestamp).toLocaleTimeString("en-GB")}{" "}
+                    </span>
+                  ) : null}
+                  <span
+                    className={cn(
+                      line.severity === "error" && "text-[var(--danger)]",
+                      line.severity === "warn" && "text-amber-300"
+                    )}
+                  >
+                    {line.message}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard

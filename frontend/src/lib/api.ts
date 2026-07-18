@@ -275,6 +275,12 @@ export const api = {
       dashboard_url: string;
     }>("/v1/stripe/overview"),
 
+  stripeRuntimeLogs: (limit = 80) =>
+    apiFetch<{
+      lines: Array<{ timestamp: string | null; message: string; severity: string | null }>;
+      source: string;
+    }>(`/v1/stripe/runtime-logs?limit=${limit}`),
+
   updateSettings: (settings: Record<string, number | null>) =>
     apiFetch<{ ok: boolean }>("/v1/auth/settings", {
       method: "PUT",

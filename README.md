@@ -59,6 +59,8 @@ Jarvis/
 | `SYNC_AGENT_API_KEY` | Sync agent bearer token |
 | `OPENAI_API_KEY` | Nutrition AI & coaching |
 | `STRIPE_SECRET_KEY` | Read-only Stripe key for business metrics (prefer restricted) |
+| `RAILWAY_TOKEN` | Account token for Business page runtime logs ([tokens](https://railway.com/account/tokens)) |
+| `RAILWAY_ENVIRONMENT_ID` / `RAILWAY_SERVICE_ID` | Usually auto-injected on Railway; set manually if logs are empty |
 | `NEXT_PUBLIC_API_URL` | Frontend → API URL |
 
 ## Railway Deployment

@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     half_ironman_race_date: str = "2026-09-13"
     # Read-only Stripe secret (or restricted key) for business metrics.
     stripe_secret_key: str = ""
+    # Railway account/project token for runtime logs on the Business page.
+    railway_token: str = ""
+    railway_environment_id: str = ""
+    railway_service_id: str = ""
 
     @property
     def cors_origin_list(self) -> list[str]:
