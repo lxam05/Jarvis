@@ -61,11 +61,15 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">Good evening</h1>
           <p className="mt-1 text-sm text-zinc-500">
+            Showing{" "}
             {new Date(data.date).toLocaleDateString("en-GB", {
               weekday: "long",
               month: "long",
               day: "numeric",
             })}
+            {new Date(data.date).toDateString() !== new Date().toDateString()
+              ? " (latest Garmin day)"
+              : ""}
           </p>
         </div>
         <SyncBadge lastSync={data.last_garmin_sync} />

@@ -23,12 +23,34 @@ from app.modules.garmin.models import GarminActivity, GarminDailySummary, Garmin
 from app.modules.nutrition.models import BodyWeightEntry, Meal
 
 
+async def _latest_garmin_day(db: AsyncSession, user_id) -> date | None:
+    result = await db.execute(
+        select(func.max(GarminDailySummary.day)).where(GarminDailySummary.user_id == user_id)
+    )
+    return result.scalar_one_or_none()
+
+
 async def get_dashboard_today(db, user_id) -> DashboardTodayResponse:
     today = date.today()
-    start = datetime.combine(today, datetime.min.time(), tzinfo=UTC)
+    # Meals always use calendar today; Garmin cards fall back to latest synced day.
+    meal_start = datetime.combine(today, datetime.min.time(), tzinfo=UTC)
+    meal_end = meal_start + timedelta(days=1)
+
+    latest_garmin = await _latest_garmin_day(db, user_id)
+    display_day = today
+    if latest_garmin is not None:
+        has_today = await db.execute(
+            select(GarminDailySummary.id).where(
+                GarminDailySummary.user_id == user_id, GarminDailySummary.day == today
+            ).limit(1)
+        )
+        if has_today.scalar_one_or_none() is None:
+            display_day = latest_garmin
+
+    start = datetime.combine(display_day, datetime.min.time(), tzinfo=UTC)
     end = start + timedelta(days=1)
 
-    ctx = await build_context(db, user_id, today)
+    ctx = await build_context(db, user_id, display_day)
 
     settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
     settings = settings_result.scalar_one_or_none()
@@ -39,7 +61,12 @@ async def get_dashboard_today(db, user_id) -> DashboardTodayResponse:
             func.coalesce(func.sum(Meal.protein_g), 0),
             func.coalesce(func.sum(Meal.carbs_g), 0),
             func.coalesce(func.sum(Meal.fat_g), 0),
-        ).where(Meal.user_id == user_id, Meal.status == "confirmed", Meal.logged_at >= start, Meal.logged_at < end)
+        ).where(
+            Meal.user_id == user_id,
+            Meal.status == "confirmed",
+            Meal.logged_at >= meal_start,
+            Meal.logged_at < meal_end,
+        )
     )
     mt = meal_totals.one()
     cal_goal = settings.calorie_goal if settings else None
@@ -56,24 +83,46 @@ async def get_dashboard_today(db, user_id) -> DashboardTodayResponse:
         protein_remaining_g=(prot_goal - float(mt[1])) if prot_goal else None,
     )
 
+    weight_since = datetime.combine(display_day - timedelta(days=30), datetime.min.time(), tzinfo=UTC)
+    weight_rows = await db.execute(
+        select(BodyWeightEntry.weight_kg)
+        .where(BodyWeightEntry.user_id == user_id, BodyWeightEntry.measured_at >= weight_since)
+        .order_by(BodyWeightEntry.measured_at.asc())
+    )
+    weight_trend = [float(w) for w in weight_rows.scalars()]
+    if not weight_trend:
+        latest_weight = await db.execute(
+            select(BodyWeightEntry.weight_kg)
+            .where(BodyWeightEntry.user_id == user_id)
+            .order_by(BodyWeightEntry.measured_at.desc())
+            .limit(1)
+        )
+        w = latest_weight.scalar_one_or_none()
+        if w is not None:
+            weight_trend = [float(w)]
+
     weight = WeightCard(
-        current_kg=ctx.weight_trend_7d[-1] if ctx.weight_trend_7d else None,
+        current_kg=weight_trend[-1] if weight_trend else None,
         goal_kg=float(settings.goal_weight_kg) if settings and settings.goal_weight_kg else None,
         weekly_change_kg=(
-            round(ctx.weight_trend_7d[-1] - ctx.weight_trend_7d[0], 2) if len(ctx.weight_trend_7d) >= 2 else None
+            round(weight_trend[-1] - weight_trend[0], 2) if len(weight_trend) >= 2 else None
         ),
-        trend_7d=ctx.weight_trend_7d,
+        trend_7d=weight_trend[-7:] if weight_trend else [],
     )
 
     sleep_result = await db.execute(
-        select(GarminSleep).where(GarminSleep.user_id == user_id, GarminSleep.day == today)
+        select(GarminSleep).where(GarminSleep.user_id == user_id, GarminSleep.day == display_day)
     )
     sleep = sleep_result.scalar_one_or_none()
     daily_result = await db.execute(
-        select(GarminDailySummary).where(GarminDailySummary.user_id == user_id, GarminDailySummary.day == today)
+        select(GarminDailySummary).where(
+            GarminDailySummary.user_id == user_id, GarminDailySummary.day == display_day
+        )
     )
     daily = daily_result.scalar_one_or_none()
-    hrv_result = await db.execute(select(GarminHrv).where(GarminHrv.user_id == user_id, GarminHrv.day == today))
+    hrv_result = await db.execute(
+        select(GarminHrv).where(GarminHrv.user_id == user_id, GarminHrv.day == display_day)
+    )
     hrv = hrv_result.scalar_one_or_none()
     recovery = RecoveryCard(
         sleep_score=sleep.score if sleep else None,
@@ -89,13 +138,21 @@ async def get_dashboard_today(db, user_id) -> DashboardTodayResponse:
     week_start = start - timedelta(days=7)
     week_acts = await db.execute(
         select(func.count(GarminActivity.id), func.coalesce(func.sum(GarminActivity.training_load), 0))
-        .where(GarminActivity.user_id == user_id, GarminActivity.start_at >= week_start)
+        .where(
+            GarminActivity.user_id == user_id,
+            GarminActivity.start_at >= week_start,
+            GarminActivity.start_at < end,
+        )
     )
     week_row = week_acts.one()
 
     today_acts = await db.execute(
         select(GarminActivity)
-        .where(GarminActivity.user_id == user_id, GarminActivity.start_at >= start, GarminActivity.start_at < end)
+        .where(
+            GarminActivity.user_id == user_id,
+            GarminActivity.start_at >= start,
+            GarminActivity.start_at < end,
+        )
         .order_by(GarminActivity.start_at.desc())
     )
     today_list = today_acts.scalars().all()
@@ -119,7 +176,7 @@ async def get_dashboard_today(db, user_id) -> DashboardTodayResponse:
 
     streaks = StreakCard(
         logging_streak_days=await _meal_logging_streak(db, user_id),
-        training_streak_days=await _training_streak(db, user_id),
+        training_streak_days=await _training_streak(db, user_id, display_day),
     )
 
     goals = GoalsCard(
@@ -163,7 +220,7 @@ async def get_dashboard_today(db, user_id) -> DashboardTodayResponse:
     last_sync = sync_result.scalar_one_or_none()
 
     return DashboardTodayResponse(
-        date=today,
+        date=display_day,
         macros=macros,
         weight=weight,
         recovery=recovery,
@@ -192,9 +249,11 @@ async def get_weight_trend(db: AsyncSession, user_id, days: int = 30) -> WeightT
 
 async def get_weekly_training(db: AsyncSession, user_id) -> WeeklyTrainingResponse:
     today = date.today()
+    latest_garmin = await _latest_garmin_day(db, user_id)
+    anchor = latest_garmin if latest_garmin is not None and latest_garmin < today else today
     days_data = []
     for i in range(6, -1, -1):
-        d = today - timedelta(days=i)
+        d = anchor - timedelta(days=i)
         start = datetime.combine(d, datetime.min.time(), tzinfo=UTC)
         end = start + timedelta(days=1)
         result = await db.execute(
@@ -227,9 +286,9 @@ async def _meal_logging_streak(db: AsyncSession, user_id) -> int:
     return streak
 
 
-async def _training_streak(db: AsyncSession, user_id) -> int:
+async def _training_streak(db: AsyncSession, user_id, anchor: date | None = None) -> int:
     streak = 0
-    d = date.today()
+    d = anchor or date.today()
     while True:
         start = datetime.combine(d, datetime.min.time(), tzinfo=UTC)
         end = start + timedelta(days=1)
