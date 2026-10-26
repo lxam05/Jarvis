@@ -2,18 +2,20 @@
 
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card } from "@/components/ui/card";
+import { Panel, Spinner } from "@/components/ui/card";
 import { api } from "@/lib/api";
 
 const CONNECT_MESSAGES: Record<string, string> = {
-  connected: "Strava connected — activities imported.",
-  connected_sync_failed: "Strava connected, but the first import failed. Try Sync now.",
+  connected: "Strava connected. Your activities are imported.",
+  connected_sync_failed: "Strava connected, but the first import failed. Select Sync now.",
   denied: "Strava connection was cancelled.",
   missing_scope: "Strava needs the “View data about your activities” permission. Connect again and keep it ticked.",
 };
 
 function formatTime(iso: string | null | undefined) {
-  return iso ? new Date(iso).toLocaleString("en-GB") : "Never";
+  return iso
+    ? new Date(iso).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+    : "Never";
 }
 
 export default function SettingsPage() {
@@ -87,66 +89,44 @@ export default function SettingsPage() {
     ?.error;
 
   return (
-    <div>
-      <h1 className="hud-title mb-6 text-xl">Settings</h1>
+    <div className="max-w-[860px]">
+      <h1 className="display text-[clamp(2.6rem,6vw,4rem)]">Settings</h1>
 
       {notice || mutationError ? (
-        <div
+        <p
+          role="status"
           className={
             mutationError
-              ? "mb-4 border border-[rgba(255,77,109,0.4)] px-4 py-3 font-mono text-xs text-[var(--danger)]"
-              : "mb-4 border border-[rgba(0,212,255,0.35)] bg-[rgba(0,212,255,0.06)] px-4 py-3 font-mono text-xs text-[#c8f0ff]"
+              ? "mt-8 rounded-[16px] border border-danger/30 px-5 py-3 text-[0.95rem] text-danger"
+              : "mt-8 rounded-[16px] bg-haze px-5 py-3 text-[0.95rem]"
           }
         >
           {mutationError instanceof Error ? mutationError.message.slice(0, 200) : notice}
-        </div>
+        </p>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="Strava">
-          {stravaError ? (
-            <p className="font-mono text-xs text-[var(--danger)]">
-              Couldn&apos;t reach the Strava API — is the latest backend deployed?
-            </p>
-          ) : !strava ? (
-            <div className="hud-spinner" />
-          ) : !strava.configured ? (
-            <p className="font-mono text-xs text-[var(--muted)]">
-              Strava isn&apos;t configured on the server yet. Set STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET on
-              the backend.
-            </p>
-          ) : (
-            <>
-              <dl className="space-y-2 font-mono text-sm">
-                <div className="flex justify-between gap-4">
-                  <dt className="text-[var(--muted)]">Account</dt>
-                  <dd className="text-[#c8f0ff]">
-                    {strava.connected ? strava.athlete_name ?? "Connected" : "Not connected"}
-                  </dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-[var(--muted)]">Last sync</dt>
-                  <dd className="text-[#c8f0ff]">{formatTime(strava.last_synced_at)}</dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-[var(--muted)]">Activities</dt>
-                  <dd className="text-[#c8f0ff]">{strava.activity_count}</dd>
-                </div>
-              </dl>
-              <div className="mt-4 flex flex-wrap gap-2">
+      <div className="mt-10 space-y-4">
+        <Panel className="md:p-8">
+          <div className="flex flex-wrap items-start justify-between gap-6">
+            <div className="min-w-0">
+              <h2 className="display-sm text-[1.5rem]">Strava</h2>
+              <p className="mt-1 text-slate">Your activities: runs, rides and swims.</p>
+            </div>
+            {strava?.configured && !stravaError ? (
+              <div className="flex flex-wrap gap-2">
                 {strava.connected ? (
                   <>
                     <button
                       onClick={() => syncMutation.mutate()}
                       disabled={syncMutation.isPending}
-                      className="hud-btn hud-btn-solid"
+                      className="btn btn-primary"
                     >
                       {syncMutation.isPending ? "Syncing…" : "Sync now"}
                     </button>
                     <button
                       onClick={() => disconnectMutation.mutate()}
                       disabled={disconnectMutation.isPending}
-                      className="hud-btn"
+                      className="btn btn-quiet"
                     >
                       Disconnect
                     </button>
@@ -155,60 +135,96 @@ export default function SettingsPage() {
                   <button
                     onClick={() => connectMutation.mutate()}
                     disabled={connectMutation.isPending}
-                    className="hud-btn hud-btn-solid"
+                    className="btn btn-primary"
                   >
                     Connect Strava
                   </button>
                 )}
               </div>
-            </>
-          )}
-        </Card>
+            ) : null}
+          </div>
 
-        <Card title="Race goal">
-          <div className="space-y-4">
+          {stravaError ? (
+            <p className="mt-6 text-danger">Can&apos;t reach the server to check Strava. Refresh to try again.</p>
+          ) : !strava ? (
+            <Spinner className="mt-6" />
+          ) : !strava.configured ? (
+            <p className="mt-6 text-slate">
+              Strava isn&apos;t set up on the server yet. Add STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET to the backend.
+            </p>
+          ) : (
+            <dl className="mt-8 grid grid-cols-2 gap-6 sm:grid-cols-3">
+              <div>
+                <dt className="text-[0.85rem] text-slate">Account</dt>
+                <dd className="mt-1 font-semibold">
+                  {strava.connected ? strava.athlete_name ?? "Connected" : "Not connected"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-[0.85rem] text-slate">Last sync</dt>
+                <dd className="num mt-1 font-semibold">{formatTime(strava.last_synced_at)}</dd>
+              </div>
+              <div>
+                <dt className="text-[0.85rem] text-slate">Activities</dt>
+                <dd className="num mt-1 font-semibold">{strava.activity_count}</dd>
+              </div>
+            </dl>
+          )}
+        </Panel>
+
+        <Panel className="md:p-8">
+          <h2 className="display-sm text-[1.5rem]">Race goal</h2>
+          <p className="mt-1 max-w-[56ch] text-slate">
+            Your race date sets the training phase: base, build, peak, then taper. Leave it empty for general base
+            training.
+          </p>
+          <form
+            className="mt-6 grid gap-4 sm:grid-cols-[1fr_200px_auto] sm:items-end"
+            onSubmit={(e) => {
+              e.preventDefault();
+              saveRace.mutate();
+            }}
+          >
             <label className="block">
-              <span className="hud-label">Race name</span>
+              <span className="text-[0.85rem] text-slate">Race name</span>
               <input
                 value={raceName}
                 onChange={(e) => setRaceName(e.target.value)}
-                placeholder="e.g. Ironman 70.3 Dublin"
-                className="hud-input mt-1.5"
+                placeholder="Ironman 70.3 Dublin"
+                className="field mt-1.5"
               />
             </label>
             <label className="block">
-              <span className="hud-label">Race date</span>
+              <span className="text-[0.85rem] text-slate">Race date</span>
               <input
                 type="date"
                 value={raceDate}
                 onChange={(e) => setRaceDate(e.target.value)}
-                className="hud-input mt-1.5"
+                className="field mt-1.5"
               />
             </label>
-            <p className="font-mono text-xs text-[var(--muted)]">
-              Sets the training phase (base → build → peak → taper). Leave empty for general base training.
-            </p>
-            <button onClick={() => saveRace.mutate()} disabled={saveRace.isPending} className="hud-btn hud-btn-solid">
+            <button type="submit" disabled={saveRace.isPending} className="btn btn-primary h-[46px]">
               Save race
             </button>
-          </div>
-        </Card>
+          </form>
+        </Panel>
 
-        <Card title="Garmin recovery sync">
-          <dl className="space-y-2 font-mono text-sm">
-            <div className="flex justify-between">
-              <dt className="text-[var(--muted)]">Last sync</dt>
-              <dd className="text-[#c8f0ff]">{formatTime(syncStatus?.last_sync_at)}</dd>
+        <Panel className="md:p-8">
+          <h2 className="display-sm text-[1.5rem]">Garmin recovery</h2>
+          <p className="mt-1 max-w-[56ch] text-slate">
+            Sleep, HRV and body battery are sent by the sync agent on your Mac. Setup steps are in docs/mac-setup.md.
+          </p>
+          <dl className="mt-8 grid grid-cols-2 gap-6 sm:grid-cols-3">
+            <div>
+              <dt className="text-[0.85rem] text-slate">Last sync</dt>
+              <dd className="num mt-1 font-semibold">{formatTime(syncStatus?.last_sync_at)}</dd>
             </div>
-            <div className="flex justify-between">
-              <dt className="text-[var(--muted)]">Status</dt>
-              <dd className="text-[#c8f0ff]">{syncStatus?.last_status ?? "—"}</dd>
+            <div>
+              <dt className="text-[0.85rem] text-slate">Status</dt>
+              <dd className="mt-1 font-semibold capitalize">{syncStatus?.last_status ?? "—"}</dd>
             </div>
           </dl>
-          <p className="mt-4 font-mono text-xs text-[var(--muted)]">
-            Sleep, HRV and body battery come from the Mac sync agent. See docs/mac-setup.md.
-          </p>
-        </Card>
+        </Panel>
       </div>
     </div>
   );

@@ -4,56 +4,34 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ExternalLink } from "lucide-react";
+import { Spinner } from "@/components/ui/card";
 import { api } from "@/lib/api";
+import { SPORT_HEX, asSport, formatDistance, formatDuration, formatPace, sportColor, sportName } from "@/lib/sport";
 
 const ActivityMap = dynamic(
   () => import("@/components/activities/activity-map").then((m) => m.ActivityMap),
   {
     ssr: false,
-    loading: () => (
-      <div className="hud-panel flex h-[360px] items-center justify-center font-mono text-sm text-[var(--muted)]">
-        Loading map…
-      </div>
-    ),
+    loading: () => <div className="skeleton h-[380px] w-full rounded-[28px]" />,
   }
 );
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="hud-panel hud-corners p-4">
-      <span className="hud-corner-tr" aria-hidden />
-      <span className="hud-corner-bl" aria-hidden />
-      <p className="hud-label">{label}</p>
-      <p className="hud-metric mt-2 text-xl tracking-tight">{value}</p>
+    <div className="border-t border-line pt-4">
+      <dt className="text-[0.85rem] text-slate">{label}</dt>
+      <dd className="display num mt-1 text-[2rem]">{value}</dd>
     </div>
   );
 }
 
-function formatDuration(seconds: number | null) {
-  if (!seconds) return "—";
-  const m = Math.round(seconds / 60);
-  if (m < 60) return `${m} min`;
-  return `${Math.floor(m / 60)}h ${m % 60}m`;
-}
-
-function formatDistance(meters: number | null) {
-  if (meters == null) return "—";
-  if (meters >= 1000) return `${(meters / 1000).toFixed(2)} km`;
-  return `${Math.round(meters)} m`;
-}
-
-function formatPace(meters: number | null, seconds: number | null) {
-  if (!meters || !seconds || meters < 1) return null;
-  const paceSec = seconds / (meters / 1000);
-  const mins = Math.floor(paceSec / 60);
-  const secs = Math.round(paceSec % 60);
-  return `${mins}:${secs.toString().padStart(2, "0")} /km`;
-}
-
-function formatSpeed(mps: number | null) {
-  if (mps == null) return null;
-  return `${(mps * 3.6).toFixed(1)} km/h`;
+function BackLink() {
+  return (
+    <Link href="/training" className="inline-flex items-center gap-2 text-slate hover:text-ink">
+      <ArrowLeft className="h-4 w-4" /> Training
+    </Link>
+  );
 }
 
 export default function ActivityDetailPage() {
@@ -69,7 +47,7 @@ export default function ActivityDetailPage() {
   if (isLoading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <div className="hud-spinner" />
+        <Spinner />
       </div>
     );
   }
@@ -77,71 +55,68 @@ export default function ActivityDetailPage() {
   if (error || !data) {
     return (
       <div>
-        <Link
-          href="/"
-          className="mb-6 inline-flex items-center gap-2 font-mono text-xs uppercase tracking-[0.12em] text-[var(--muted)] hover:text-[var(--accent)]"
-        >
-          <ArrowLeft className="h-4 w-4" /> Back
-        </Link>
-        <div className="hud-panel border-[rgba(255,77,109,0.4)] p-6 font-mono text-sm text-[var(--danger)]">
-          Activity not found
-        </div>
+        <BackLink />
+        <p className="mt-8 rounded-[20px] bg-haze px-6 py-10 text-slate">
+          This activity wasn&apos;t found. It may have been deleted on Strava.
+        </p>
       </div>
     );
   }
 
-  const pace = formatPace(data.distance_m, data.moving_seconds ?? data.elapsed_seconds);
-  const avgSpeed = formatSpeed(data.avg_speed_mps);
+  const sport = asSport(data.sport);
+  const moving = data.moving_seconds ?? data.elapsed_seconds;
+  const pace = formatPace(data.sport, data.distance_m, moving);
   const route = (data.route || []).map(([lat, lng]) => [lat, lng] as [number, number]);
+
+  const stats: Array<[string, string | null]> = [
+    ["Distance", formatDistance(data.distance_m, 2)],
+    ["Moving time", formatDuration(moving)],
+    [sport === "cycling" ? "Avg speed" : "Avg pace", pace],
+    ["Elevation gain", data.ascent_m != null ? `${Math.round(data.ascent_m)} m` : null],
+    ["Avg heart rate", data.avg_hr != null ? `${data.avg_hr} bpm` : null],
+    ["Max heart rate", data.max_hr != null ? `${data.max_hr} bpm` : null],
+    ["Avg power", data.avg_watts != null ? `${Math.round(data.avg_watts)} W` : null],
+    ["Relative effort", data.training_load != null ? data.training_load.toFixed(0) : null],
+    ["Energy", data.calories != null ? `${data.calories} kcal` : null],
+  ];
 
   return (
     <div>
-      <Link
-        href="/"
-        className="mb-6 inline-flex items-center gap-2 font-mono text-xs uppercase tracking-[0.12em] text-[var(--muted)] hover:text-[var(--accent)]"
-      >
-        <ArrowLeft className="h-4 w-4" /> Today
-      </Link>
+      <BackLink />
 
-      <div className="mb-6">
-        <p className="hud-label">{data.sport || "Activity"}</p>
-        <h1 className="hud-title mt-2 text-xl">{data.name || data.sport || "Activity"}</h1>
-        <p className="mt-2 font-mono text-xs text-[var(--muted)]">
-          {new Date(data.start_at).toLocaleString("en-GB", {
-            weekday: "long",
-            day: "numeric",
-            month: "long",
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </p>
+      <div className="mt-8 flex flex-wrap items-end justify-between gap-6">
+        <div className="min-w-0">
+          <p className="flex items-center gap-2 font-medium">
+            <span className="h-3 w-3 rounded-full" style={{ background: sportColor(data.sport) }} aria-hidden />
+            {sportName(data.sport)}
+            <span className="text-slate">
+              {new Date(data.start_at).toLocaleString("en-GB", {
+                weekday: "long",
+                day: "numeric",
+                month: "long",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </span>
+          </p>
+          <h1 className="display mt-4 max-w-[18ch] text-[clamp(2.4rem,6vw,4rem)]">{data.name || sportName(data.sport)}</h1>
+        </div>
+        <a href={data.strava_url} target="_blank" rel="noreferrer" className="btn btn-quiet">
+          Open in Strava <ExternalLink className="h-4 w-4" />
+        </a>
       </div>
 
-      <ActivityMap route={route} />
-
-      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <Stat label="Moving time" value={formatDuration(data.moving_seconds ?? data.elapsed_seconds)} />
-        <Stat label="Distance" value={formatDistance(data.distance_m)} />
-        <Stat label="Calories" value={data.calories != null ? `${data.calories} kcal` : "—"} />
-        {pace ? <Stat label="Pace" value={pace} /> : null}
-        {avgSpeed ? <Stat label="Avg speed" value={avgSpeed} /> : null}
-        <Stat label="Avg HR" value={data.avg_hr != null ? `${data.avg_hr} bpm` : "—"} />
-        <Stat label="Max HR" value={data.max_hr != null ? `${data.max_hr} bpm` : "—"} />
-        {data.ascent_m != null ? <Stat label="Ascent" value={`${Math.round(data.ascent_m)} m`} /> : null}
-        {data.avg_watts != null ? <Stat label="Avg power" value={`${Math.round(data.avg_watts)} W`} /> : null}
-        {data.training_load != null ? (
-          <Stat label="Relative effort" value={data.training_load.toFixed(0)} />
-        ) : null}
+      <div className="mt-10">
+        <ActivityMap route={route} color={sport ? SPORT_HEX[sport] : "#0e2236"} />
       </div>
 
-      <a
-        href={data.strava_url}
-        target="_blank"
-        rel="noreferrer"
-        className="mt-6 inline-flex font-mono text-xs uppercase tracking-[0.12em] text-[var(--accent)] hover:underline"
-      >
-        View on Strava →
-      </a>
+      <dl className="mt-10 grid grid-cols-2 gap-x-8 gap-y-8 md:grid-cols-3">
+        {stats
+          .filter((s): s is [string, string] => s[1] != null && s[1] !== "—")
+          .map(([label, value]) => (
+            <Stat key={label} label={label} value={value} />
+          ))}
+      </dl>
     </div>
   );
 }

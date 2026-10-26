@@ -2,9 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { motion } from "framer-motion";
-import { Send, Trash2 } from "lucide-react";
-import { Card } from "@/components/ui/card";
+import { ArrowUp } from "lucide-react";
 import { api, type CoachMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -37,17 +35,8 @@ function saveHistory(messages: CoachMessage[]) {
 export default function CoachPage() {
   const [messages, setMessages] = useState<CoachMessage[]>([]);
   const [input, setInput] = useState("");
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    // localStorage only exists in the browser, so restore after mount to keep hydration stable.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setMessages(loadHistory());
-  }, []);
-
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages]);
+  const endRef = useRef<HTMLDivElement>(null);
+  const startedRef = useRef(false);
 
   const chatMutation = useMutation({
     mutationFn: (history: CoachMessage[]) => api.coachChat(history),
@@ -58,15 +47,35 @@ export default function CoachPage() {
     },
   });
 
-  const send = (text: string) => {
+  const send = (text: string, history: CoachMessage[] = messages) => {
     const msg = text.trim();
     if (!msg || chatMutation.isPending) return;
     setInput("");
-    const next = [...messages, { role: "user" as const, content: msg }];
+    const next = [...history, { role: "user" as const, content: msg }];
     setMessages(next);
     saveHistory(next);
     chatMutation.mutate(next);
   };
+
+  useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+    // localStorage only exists in the browser, so restore after mount to keep hydration stable.
+    const history = loadHistory();
+    setMessages(history);
+    // A question typed on the Today page arrives as ?q=.
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (q) {
+      window.history.replaceState(null, "", window.location.pathname);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      send(q, history);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, chatMutation.isPending]);
 
   const clear = () => {
     setMessages([]);
@@ -74,86 +83,103 @@ export default function CoachPage() {
     chatMutation.reset();
   };
 
+  const empty = messages.length === 0;
+
   return (
-    <div>
-      <div className="mb-6 flex items-center justify-between gap-4">
-        <h1 className="hud-title text-xl">Coach</h1>
-        {messages.length > 0 ? (
-          <button onClick={clear} className="hud-btn">
-            <Trash2 className="h-4 w-4" />
-            New chat
+    <div className="mx-auto flex min-h-[calc(100vh-9rem)] max-w-[760px] flex-col">
+      <div className="flex items-end justify-between gap-4">
+        <h1 className="display text-[clamp(2.6rem,6vw,4rem)]">Coach</h1>
+        {!empty ? (
+          <button onClick={clear} className="btn btn-quiet">
+            New conversation
           </button>
         ) : null}
       </div>
 
-      <Card className="flex h-[calc(100vh-11rem)] min-h-[420px] flex-col">
-        <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto pr-2">
-          {messages.length === 0 && (
-            <div className="flex h-full flex-col items-center justify-center text-center">
-              <p className="hud-title text-sm">Ask your coach</p>
-              <p className="mt-3 max-w-md font-mono text-xs text-[var(--muted)]">
-                Answers use your Strava activities and Garmin sleep, HRV and body battery.
-              </p>
-              <div className="mt-6 flex max-w-xl flex-wrap justify-center gap-2">
-                {SUGGESTIONS.map((s) => (
+      <div className="flex-1 pb-6 pt-8">
+        {empty ? (
+          <div>
+            <p className="max-w-[52ch] text-[1.1rem] leading-relaxed text-slate">
+              Ask anything about your training. Answers draw on your Strava activities and your Garmin sleep, HRV
+              and body battery.
+            </p>
+            <ul className="mt-8 grid gap-2 sm:grid-cols-2">
+              {SUGGESTIONS.map((s) => (
+                <li key={s}>
                   <button
-                    key={s}
                     onClick={() => send(s)}
-                    className="border border-[rgba(0,212,255,0.25)] px-3 py-2 text-left font-mono text-xs text-[#a8d4e8] transition-colors hover:border-[rgba(0,212,255,0.55)] hover:text-[var(--accent)]"
+                    className="h-full w-full rounded-[18px] bg-haze px-5 py-4 text-left transition-colors hover:bg-haze-strong"
                   >
                     {s}
                   </button>
-                ))}
-              </div>
-            </div>
-          )}
-          {messages.map((m, i) => (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={cn(
-                "max-w-[85%] border px-4 py-3 font-mono text-sm",
-                m.role === "user"
-                  ? "ml-auto border-[rgba(0,212,255,0.4)] bg-[rgba(0,212,255,0.12)] text-[#c8f0ff]"
-                  : "border-[rgba(0,212,255,0.18)] bg-[rgba(0,30,50,0.5)] text-[#a8d4e8]"
-              )}
-            >
-              <div className="whitespace-pre-wrap">{m.content}</div>
-            </motion.div>
-          ))}
-          {chatMutation.isPending && (
-            <div className="font-mono text-xs uppercase tracking-[0.15em] text-[var(--muted)]">
-              Coach is thinking…
-            </div>
-          )}
-          {chatMutation.isError && (
-            <div className="border border-[rgba(255,77,109,0.4)] px-4 py-3 font-mono text-xs text-[var(--danger)]">
-              {chatMutation.error instanceof Error
-                ? chatMutation.error.message.slice(0, 200)
-                : "Coach unavailable"}
-            </div>
-          )}
-        </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <ol className="space-y-6">
+            {messages.map((m, i) => (
+              <li key={i} className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}>
+                {m.role === "user" ? (
+                  <p className="max-w-[80%] whitespace-pre-wrap rounded-[22px] rounded-br-md bg-ink px-5 py-3 text-paper">
+                    {m.content}
+                  </p>
+                ) : (
+                  <div className="max-w-[62ch]">
+                    <p className="mb-1.5 text-[0.82rem] font-medium text-slate">Coach</p>
+                    <p className="whitespace-pre-wrap text-[1.02rem] leading-relaxed">{m.content}</p>
+                  </div>
+                )}
+              </li>
+            ))}
+            {chatMutation.isPending ? (
+              <li aria-live="polite">
+                <p className="mb-1.5 text-[0.82rem] font-medium text-slate">Coach</p>
+                <div className="flex gap-1.5" aria-label="Coach is writing">
+                  <span className="skeleton h-2.5 w-2.5 rounded-full" />
+                  <span className="skeleton h-2.5 w-2.5 rounded-full" />
+                  <span className="skeleton h-2.5 w-2.5 rounded-full" />
+                </div>
+              </li>
+            ) : null}
+            {chatMutation.isError ? (
+              <li role="alert" className="rounded-[16px] border border-danger/30 px-5 py-3 text-[0.92rem] text-danger">
+                {chatMutation.error instanceof Error
+                  ? chatMutation.error.message.slice(0, 200)
+                  : "The coach didn't respond. Send your question again."}
+              </li>
+            ) : null}
+          </ol>
+        )}
+        <div ref={endRef} />
+      </div>
 
-        <form
-          className="mt-4 flex gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            send(input);
-          }}
+      <form
+        className="sticky bottom-24 flex md:bottom-4 items-center gap-2 rounded-full border border-line bg-paper py-1.5 pl-5 pr-1.5 shadow-[0_10px_30px_rgba(14,34,54,0.08)] focus-within:border-ink"
+        onSubmit={(e) => {
+          e.preventDefault();
+          send(input);
+        }}
+      >
+        <label htmlFor="coach-input" className="sr-only">
+          Message your coach
+        </label>
+        <input
+          id="coach-input"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Ask about training, recovery or your race plan…"
+          className="min-w-0 flex-1 bg-transparent py-2 outline-none placeholder:text-[#8fa1b0]"
+        />
+        <button
+          type="submit"
+          disabled={chatMutation.isPending || !input.trim()}
+          className="btn btn-primary btn-icon"
+          aria-label="Send"
         >
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask about your training, recovery, race plan…"
-            className="hud-input flex-1"
-          />
-          <button type="submit" disabled={chatMutation.isPending} className="hud-btn hud-btn-solid px-4">
-            <Send className="h-4 w-4" />
-          </button>
-        </form>
-      </Card>
+          <ArrowUp className="h-[18px] w-[18px]" />
+        </button>
+      </form>
     </div>
   );
 }

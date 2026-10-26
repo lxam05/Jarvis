@@ -1,63 +1,51 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronRight } from "lucide-react";
 import type { ActivitySummary } from "@/lib/api";
+import { formatDistance, formatDuration, formatPace, sportColor, sportName } from "@/lib/sport";
 
-function formatDuration(seconds: number | null | undefined) {
-  if (!seconds) return "—";
-  const m = Math.round(seconds / 60);
-  if (m < 60) return `${m} min`;
-  const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m`;
-}
-
-function formatDistance(meters: number | null | undefined) {
-  if (meters == null) return null;
-  if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`;
-  return `${Math.round(meters)} m`;
-}
-
-export function ActivityRow({
-  activity,
-  showDate = false,
-}: {
-  activity: ActivitySummary;
-  showDate?: boolean;
-}) {
-  const distance = formatDistance(activity.distance_m);
-  const when = showDate
-    ? new Date(activity.start_at).toLocaleDateString("en-GB", {
-        weekday: "short",
-        day: "numeric",
-        month: "short",
-      })
-    : new Date(activity.start_at).toLocaleTimeString("en-GB", {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
+/** One activity as a hairline row: what, how far, how fast, when. */
+export function ActivityRow({ activity }: { activity: ActivitySummary }) {
+  const date = new Date(activity.start_at);
+  const pace = formatPace(activity.sport, activity.distance_m, activity.duration_seconds);
 
   return (
-    <Link
-      href={`/activities/${activity.id}`}
-      className="hud-panel hud-corners group flex items-center justify-between gap-4 px-5 py-4 transition-all hover:border-[rgba(0,212,255,0.5)] hover:bg-[rgba(0,212,255,0.06)]"
-    >
-      <span className="hud-corner-tr" aria-hidden />
-      <span className="hud-corner-bl" aria-hidden />
-      <div className="min-w-0">
-        <p className="truncate font-mono text-sm tracking-wide text-[#e8fbff]">
-          {activity.name || activity.sport || "Activity"}
-        </p>
-        <p className="mt-1 font-mono text-xs text-[var(--muted)]">
-          {when}
-          {" · "}
-          {formatDuration(activity.duration_seconds)}
-          {distance ? ` · ${distance}` : ""}
-          {" · "}
-          {activity.calories ?? 0} kcal
-        </p>
-      </div>
-      <ChevronRight className="h-5 w-5 shrink-0 text-[var(--muted)] transition-colors group-hover:text-[var(--accent)]" />
-    </Link>
+    <li className="border-b border-line last:border-0">
+      <Link
+        href={`/activities/${activity.id}`}
+        className="group grid grid-cols-[auto_1fr_auto] items-center gap-x-4 gap-y-0.5 py-4 md:grid-cols-[auto_minmax(0,1fr)_7rem_7rem_6rem_7rem]"
+      >
+        <span
+          className="row-span-2 h-9 w-1.5 rounded-full md:row-span-1"
+          style={{ background: sportColor(activity.sport) }}
+          aria-hidden
+        />
+        <span className="min-w-0">
+          <span className="block truncate font-medium group-hover:underline group-hover:underline-offset-4">
+            {activity.name || sportName(activity.sport)}
+          </span>
+          <span className="block text-[0.85rem] text-slate md:hidden">
+            {formatDistance(activity.distance_m) ?? formatDuration(activity.duration_seconds)}
+            {pace ? `, ${pace}` : ""}
+          </span>
+        </span>
+        <span className="num hidden text-right md:block">{formatDistance(activity.distance_m) ?? "—"}</span>
+        <span className="num hidden text-right text-slate md:block">{formatDuration(activity.duration_seconds)}</span>
+        <span className="num hidden text-right text-slate md:block">{pace ?? ""}</span>
+        <span className="num text-right text-[0.85rem] text-slate md:text-[0.95rem]">
+          {date.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}
+        </span>
+      </Link>
+    </li>
+  );
+}
+
+export function ActivityList({ activities }: { activities: ActivitySummary[] }) {
+  return (
+    <ul className="border-t border-line">
+      {activities.map((a) => (
+        <ActivityRow key={a.id} activity={a} />
+      ))}
+    </ul>
   );
 }

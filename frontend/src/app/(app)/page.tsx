@@ -1,10 +1,11 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { JarvisHud } from "@/components/dashboard/jarvis-hud";
+import { Spinner } from "@/components/ui/card";
+import { TodayView } from "@/components/today/today-view";
 import { api } from "@/lib/api";
 
-export default function DashboardPage() {
+export default function TodayPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["dashboard", "today"],
     queryFn: api.dashboardToday,
@@ -13,19 +14,20 @@ export default function DashboardPage() {
 
   if (isLoading) {
     return (
-      <div className="flex h-[70vh] items-center justify-center">
-        <div className="hud-spinner" />
+      <div className="flex h-[60vh] items-center justify-center">
+        <Spinner />
       </div>
     );
   }
 
   if (error || !data) {
     return (
-      <div className="hud-panel border-[rgba(255,77,109,0.4)] p-6 font-mono text-sm text-[var(--danger)]">
-        Failed to load dashboard. Is the API running?
+      <div className="rounded-[20px] bg-haze px-6 py-10">
+        <h1 className="display-sm text-[1.6rem]">Can&apos;t reach your training data.</h1>
+        <p className="mt-2 text-slate">The server didn&apos;t respond. Refresh in a minute.</p>
       </div>
     );
   }
 
-  return <JarvisHud data={data} />;
+  return <TodayView data={data} />;
 }

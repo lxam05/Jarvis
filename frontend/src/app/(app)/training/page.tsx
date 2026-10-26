@@ -1,85 +1,46 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Legend,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import { ActivityRow } from "@/components/activities/activity-row";
-import { Card } from "@/components/ui/card";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { ActivityList } from "@/components/activities/activity-row";
+import { Section, Spinner } from "@/components/ui/card";
 import { api, type ActivitySummary } from "@/lib/api";
+import { SPORTS, SPORT_COLOR, SPORT_HEX, SPORT_NAME, type Sport, asSport, startOfWeek } from "@/lib/sport";
 import { cn } from "@/lib/utils";
 
-const CHART_STROKE = "#4a7a90";
-const TOOLTIP_STYLE = {
-  background: "rgba(2, 16, 28, 0.95)",
-  border: "1px solid rgba(0, 212, 255, 0.35)",
-  color: "#e0f7ff",
-  fontFamily: "var(--font-hud-mono)",
-  fontSize: 12,
-};
-
-const SPORT_COLORS = {
-  running: "#00d4ff",
-  cycling: "#34d399",
-  swimming: "#a78bfa",
-} as const;
-
-const SPORT_LABEL: Record<string, string> = {
-  running: "Run",
-  cycling: "Ride",
-  swimming: "Swim",
-};
-
 /** Scale actual km → run-equivalent km for comparable bar heights. */
-const EQ = {
+const EQ: Record<Sport, number> = {
   running: 1,
   // ~4 km bike ≈ 1 km run
   cycling: 1 / 4,
   // 1.5 km swim ≈ 10 km run
   swimming: 10 / 1.5,
-} as const;
+};
 
-type Sport = "running" | "cycling" | "swimming";
+const KEY: Record<Sport, "running_km" | "cycling_km" | "swimming_km"> = {
+  running: "running_km",
+  cycling: "cycling_km",
+  swimming: "swimming_km",
+};
 
-function EquivalenceToggle({
-  enabled,
-  onChange,
-}: {
-  enabled: boolean;
-  onChange: (next: boolean) => void;
-}) {
+function Toggle({ enabled, onChange }: { enabled: boolean; onChange: (next: boolean) => void }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={enabled}
       onClick={() => onChange(!enabled)}
-      className={cn(
-        "flex items-center gap-2 border px-2.5 py-1.5 font-mono text-[0.65rem] uppercase tracking-[0.14em] transition-colors",
-        enabled
-          ? "border-[rgba(0,212,255,0.55)] bg-[rgba(0,212,255,0.12)] text-[var(--accent)]"
-          : "border-[rgba(0,212,255,0.22)] text-[var(--muted)] hover:border-[rgba(0,212,255,0.4)] hover:text-[#c8f0ff]"
-      )}
+      className="flex items-center gap-3 text-[0.92rem] text-slate hover:text-ink"
     >
-      Equivalences
+      Compare as run-equivalent
       <span
-        className={cn(
-          "relative h-4 w-7 rounded-full transition-colors",
-          enabled ? "bg-[var(--accent)]" : "bg-[rgba(0,212,255,0.2)]"
-        )}
+        className={cn("relative h-6 w-10 rounded-full transition-colors", enabled ? "bg-ink" : "bg-haze-strong")}
       >
         <span
           className={cn(
-            "absolute top-0.5 h-3 w-3 rounded-full bg-[#02101c] transition-transform",
-            enabled ? "left-3.5" : "left-0.5"
+            "absolute top-1 h-4 w-4 rounded-full bg-paper shadow-sm transition-transform",
+            enabled ? "translate-x-5" : "translate-x-1"
           )}
         />
       </span>
@@ -91,15 +52,11 @@ export default function TrainingPage() {
   const [selectedSport, setSelectedSport] = useState<Sport | null>(null);
   const [equivalences, setEquivalences] = useState(false);
 
-  const {
-    data: coach,
-    isLoading: coachLoading,
-    isError: coachError,
-    error: coachErr,
-  } = useQuery({
+  const { data: coach, isLoading: coachLoading, isError: coachError } = useQuery({
     queryKey: ["coaching", "session"],
-    queryFn: () => api.coachingSession(),
+    queryFn: api.coachingSession,
     retry: 1,
+    staleTime: 10 * 60_000,
   });
 
   const { data: distance, isLoading: chartLoading } = useQuery({
@@ -112,159 +69,89 @@ export default function TrainingPage() {
     queryFn: () => api.listActivities(60),
   });
 
-  useEffect(() => {
-    if (coach?.recommended_sport && selectedSport === null) {
-      const sport = coach.recommended_sport as Sport;
-      if (sport === "running" || sport === "cycling" || sport === "swimming") {
-        setSelectedSport(sport);
-      }
-    }
-  }, [coach?.recommended_sport, selectedSport]);
-
-  const now = new Date();
-  const day = now.getDay();
-  const weekStart = new Date(now);
-  weekStart.setHours(0, 0, 0, 0);
-  weekStart.setDate(weekStart.getDate() - ((day + 6) % 7));
-
+  const weekStart = startOfWeek();
   const thisWeek: ActivitySummary[] = [];
-  const previous: ActivitySummary[] = [];
+  const earlier: ActivitySummary[] = [];
   for (const activity of activities) {
-    const start = new Date(activity.start_at);
-    if (start >= weekStart) thisWeek.push(activity);
-    else previous.push(activity);
+    if (new Date(activity.start_at) >= weekStart) thisWeek.push(activity);
+    else earlier.push(activity);
   }
-
-  const rawWeeks = distance?.weeks ?? [];
 
   const chartData = useMemo(
     () =>
-      rawWeeks.map((w) => {
-        if (!equivalences) {
-          return {
-            label: w.label,
-            running_km: w.running_km,
-            cycling_km: w.cycling_km,
-            swimming_km: w.swimming_km,
-            running_actual: w.running_km,
-            cycling_actual: w.cycling_km,
-            swimming_actual: w.swimming_km,
-          };
-        }
-        return {
-          label: w.label,
-          running_km: w.running_km * EQ.running,
-          cycling_km: w.cycling_km * EQ.cycling,
-          swimming_km: w.swimming_km * EQ.swimming,
-          running_actual: w.running_km,
-          cycling_actual: w.cycling_km,
-          swimming_actual: w.swimming_km,
-        };
-      }),
-    [rawWeeks, equivalences]
+      (distance?.weeks ?? []).map((w) => ({
+        label: w.label,
+        running_km: w.running_km * (equivalences ? EQ.running : 1),
+        cycling_km: w.cycling_km * (equivalences ? EQ.cycling : 1),
+        swimming_km: w.swimming_km * (equivalences ? EQ.swimming : 1),
+        actual: { running_km: w.running_km, cycling_km: w.cycling_km, swimming_km: w.swimming_km },
+      })),
+    [distance, equivalences]
   );
 
-  const totals = rawWeeks.reduce(
-    (acc, w) => ({
-      running: acc.running + w.running_km,
-      cycling: acc.cycling + w.cycling_km,
-      swimming: acc.swimming + w.swimming_km,
-    }),
-    { running: 0, cycling: 0, swimming: 0 }
-  );
+  const totals = SPORTS.map((sport) => ({
+    sport,
+    km: (distance?.weeks ?? []).reduce((sum, w) => sum + w[KEY[sport]], 0),
+  }));
 
-  const eqTotals = {
-    running: totals.running * EQ.running,
-    cycling: totals.cycling * EQ.cycling,
-    swimming: totals.swimming * EQ.swimming,
-  };
-
-  const activeSport = selectedSport ?? (coach?.recommended_sport as Sport | undefined);
+  const recommended = asSport(coach?.recommended_sport);
+  const activeSport = selectedSport ?? recommended;
   const activeSession = coach?.sessions.find((s) => s.sport === activeSport);
 
   return (
     <div>
-      <h1 className="hud-title mb-6 text-xl">Training</h1>
+      <h1 className="display text-[clamp(2.6rem,6vw,4rem)]">Training</h1>
 
-      <Card
-        title="Today's session"
+      <Section
+        className="mt-12"
+        title="Today's options"
         subtitle={
           coach
             ? coach.race_date
-              ? `${coach.race_name} · ${coach.weeks_to_race}w out · ${coach.phase}`
-              : `No race set · ${coach.phase}`
-            : "Session coach"
+              ? `${coach.weeks_to_race} weeks to ${coach.race_name}, ${coach.phase} phase`
+              : `No race set, ${coach.phase} training`
+            : undefined
         }
       >
         {coachLoading ? (
-          <div className="flex h-40 items-center justify-center">
-            <div className="hud-spinner" />
-          </div>
-        ) : coachError ? (
-          <p className="font-mono text-sm text-[var(--muted)]">
-            Coach unavailable
-            {coachErr instanceof Error && coachErr.message.includes("Not Found")
-              ? " — API not deployed yet"
-              : coachErr instanceof Error
-                ? ` — ${coachErr.message.slice(0, 120)}`
-                : ""}
-            .
+          <div className="skeleton h-48 w-full" />
+        ) : coachError || !coach ? (
+          <p className="rounded-[20px] bg-haze px-6 py-8 text-slate">
+            The session coach didn&apos;t respond. Refresh to try again.
           </p>
-        ) : !coach ? (
-          <p className="font-mono text-sm text-[var(--muted)]">Coach unavailable.</p>
         ) : (
-          <div className="space-y-5">
-            <div className="flex flex-wrap gap-3 font-mono text-xs text-[var(--muted)]">
-              <span>
-                Recovery{" "}
-                <span className="text-[#c8f0ff]">{Math.round(coach.recovery_score)}</span>
-              </span>
-              {coach.sleep_score != null ? (
-                <span>
-                  Sleep <span className="text-[#c8f0ff]">{coach.sleep_score}</span>
-                </span>
-              ) : null}
-              {coach.hrv_status ? (
-                <span>
-                  HRV <span className="text-[#c8f0ff]">{coach.hrv_status}</span>
-                </span>
-              ) : null}
-              {coach.race_date ? (
-                <span>
-                  Race{" "}
-                  <span className="text-[#c8f0ff]">
-                    {new Date(coach.race_date + "T12:00:00").toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                    })}
-                  </span>
-                </span>
-              ) : null}
-            </div>
-
-            <p className="max-w-2xl text-sm leading-relaxed text-[#c8f0ff]">
-              {coach.reason}
-            </p>
-
-            <div className="flex flex-wrap gap-2">
-              {(["running", "cycling", "swimming"] as Sport[]).map((sport) => {
-                const isRecommended = coach.recommended_sport === sport;
-                const isSelected = activeSport === sport;
+          <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+            <div role="radiogroup" aria-label="Sport" className="flex flex-col gap-2">
+              {coach.sessions.map((session) => {
+                const sport = asSport(session.sport);
+                const isSelected = session.sport === activeSport;
                 return (
                   <button
-                    key={sport}
+                    key={session.sport}
                     type="button"
-                    onClick={() => setSelectedSport(sport)}
+                    role="radio"
+                    aria-checked={isSelected}
+                    onClick={() => sport && setSelectedSport(sport)}
                     className={cn(
-                      "border px-3 py-2 font-mono text-[0.7rem] uppercase tracking-[0.14em] transition-colors",
-                      isSelected
-                        ? "border-[rgba(0,212,255,0.65)] bg-[rgba(0,212,255,0.14)] text-[var(--accent)]"
-                        : "border-[rgba(0,212,255,0.22)] text-[var(--muted)] hover:border-[rgba(0,212,255,0.4)] hover:text-[#c8f0ff]"
+                      "flex items-center gap-4 rounded-[18px] border px-5 py-4 text-left transition-colors",
+                      isSelected ? "border-ink bg-paper" : "border-transparent bg-haze hover:bg-haze-strong"
                     )}
                   >
-                    {SPORT_LABEL[sport]}
-                    {isRecommended ? (
-                      <span className="ml-2 text-[0.6rem] text-[var(--accent)]">priority</span>
+                    <span
+                      className="h-10 w-1.5 shrink-0 rounded-full"
+                      style={{ background: sport ? SPORT_COLOR[sport] : "var(--slate)" }}
+                      aria-hidden
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-semibold">{session.title}</span>
+                      <span className="block text-[0.88rem] text-slate">
+                        {sport ? SPORT_NAME[sport] : session.sport}, {session.duration_min} min, {session.intensity}
+                      </span>
+                    </span>
+                    {session.sport === coach.recommended_sport ? (
+                      <span className="shrink-0 rounded-full bg-ink px-2.5 py-1 text-[0.75rem] font-semibold text-paper">
+                        Coach&apos;s pick
+                      </span>
                     ) : null}
                   </button>
                 );
@@ -272,200 +159,95 @@ export default function TrainingPage() {
             </div>
 
             {activeSession ? (
-              <div
-                className={cn(
-                  "border border-[rgba(0,212,255,0.28)] bg-[rgba(0,212,255,0.06)] p-4",
-                  coach.recommended_sport === activeSession.sport &&
-                    "border-[rgba(0,212,255,0.5)]"
-                )}
-              >
-                <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-                  <h3 className="font-mono text-sm uppercase tracking-[0.12em] text-[var(--accent)]">
-                    {activeSession.title}
-                  </h3>
-                  <span className="font-mono text-xs text-[var(--muted)]">
-                    {activeSession.duration_min} min · {activeSession.intensity}
-                  </span>
-                </div>
-                <p className="mb-2 text-sm leading-relaxed text-[#c8f0ff]">
-                  {activeSession.description}
-                </p>
-                <p className="font-mono text-[0.65rem] uppercase tracking-[0.12em] text-[var(--muted)]">
-                  Focus · {activeSession.focus}
+              <div className="lg:pt-2">
+                <p className="text-slate">{activeSession.focus}</p>
+                <h3 className="display mt-3 text-[clamp(2rem,4vw,3rem)]">{activeSession.title}.</h3>
+                <p className="mt-5 max-w-[56ch] text-[1.05rem] leading-relaxed">{activeSession.description}</p>
+                <p className="mt-6 max-w-[56ch] border-l-2 border-line pl-4 text-[0.95rem] leading-relaxed text-slate">
+                  {coach.reason}
                 </p>
               </div>
             ) : null}
-
-            <div className="grid gap-3 sm:grid-cols-3">
-              {coach.sessions.map((session) => {
-                const isRec = session.sport === coach.recommended_sport;
-                const isSel = session.sport === activeSport;
-                return (
-                  <button
-                    key={session.sport}
-                    type="button"
-                    onClick={() => setSelectedSport(session.sport as Sport)}
-                    className={cn(
-                      "border p-3 text-left transition-colors",
-                      isSel
-                        ? "border-[rgba(0,212,255,0.55)] bg-[rgba(0,212,255,0.1)]"
-                        : "border-[rgba(0,212,255,0.18)] hover:border-[rgba(0,212,255,0.35)]"
-                    )}
-                  >
-                    <div className="mb-1 flex items-center gap-2">
-                      <span
-                        className="h-2 w-2 rounded-full"
-                        style={{
-                          background:
-                            SPORT_COLORS[session.sport as Sport] ?? SPORT_COLORS.running,
-                        }}
-                      />
-                      <span className="font-mono text-[0.65rem] uppercase tracking-[0.12em] text-[var(--muted)]">
-                        {SPORT_LABEL[session.sport] ?? session.sport}
-                      </span>
-                      {isRec ? (
-                        <span className="font-mono text-[0.55rem] uppercase text-[var(--accent)]">
-                          do this
-                        </span>
-                      ) : null}
-                    </div>
-                    <p className="text-sm text-[#c8f0ff]">{session.title}</p>
-                    <p className="mt-1 font-mono text-[0.65rem] text-[var(--muted)]">
-                      {session.duration_min} min · {session.intensity}
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
           </div>
         )}
-      </Card>
+      </Section>
 
-      <Card
-        className="mt-8"
+      <Section
+        className="mt-20"
         title="Weekly distance"
-        subtitle={
-          equivalences
-            ? "Run-eq km · swim 1.5≈10 run · bike ÷4"
-            : "Last 8 weeks · actual km by sport"
-        }
-        action={<EquivalenceToggle enabled={equivalences} onChange={setEquivalences} />}
+        subtitle={equivalences ? "Swim 1.5 km counts as 10 km running; ride km divided by 4." : "Last 8 weeks, in km."}
+        action={<Toggle enabled={equivalences} onChange={setEquivalences} />}
       >
-        <div className="mb-4 flex flex-wrap gap-4 font-mono text-xs text-[var(--muted)]">
-          <span>
-            <span className="mr-2 inline-block h-2 w-2 rounded-full bg-[#00d4ff]" />
-            Run {totals.running.toFixed(1)} km
-            {equivalences ? ` · ${eqTotals.running.toFixed(1)} eq` : ""}
-          </span>
-          <span>
-            <span className="mr-2 inline-block h-2 w-2 rounded-full bg-[#34d399]" />
-            Ride {totals.cycling.toFixed(1)} km
-            {equivalences ? ` · ${eqTotals.cycling.toFixed(1)} eq` : ""}
-          </span>
-          <span>
-            <span className="mr-2 inline-block h-2 w-2 rounded-full bg-[#a78bfa]" />
-            Swim {totals.swimming.toFixed(1)} km
-            {equivalences ? ` · ${eqTotals.swimming.toFixed(1)} eq` : ""}
-          </span>
+        <div className="mb-6 flex flex-wrap gap-x-8 gap-y-2">
+          {totals.map(({ sport, km }) => (
+            <span key={sport} className="flex items-center gap-2">
+              <span className="h-2.5 w-2.5 rounded-full" style={{ background: SPORT_COLOR[sport] }} aria-hidden />
+              <span className="text-slate">{SPORT_NAME[sport]}</span>
+              <span className="num font-semibold">{km.toFixed(1)} km</span>
+            </span>
+          ))}
         </div>
-        <div className="h-72">
+        <div className="h-80">
           {chartLoading ? (
             <div className="flex h-full items-center justify-center">
-              <div className="hud-spinner" />
+              <Spinner />
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} barGap={2} barCategoryGap="18%">
-                <CartesianGrid stroke="rgba(0,212,255,0.08)" vertical={false} />
-                <XAxis
-                  dataKey="label"
-                  stroke={CHART_STROKE}
-                  fontSize={11}
-                  fontFamily="var(--font-hud-mono)"
-                  tickLine={false}
-                />
+              <BarChart data={chartData} barGap={3} barCategoryGap="22%">
+                <CartesianGrid stroke="#e6edf1" vertical={false} />
+                <XAxis dataKey="label" stroke="#5b7083" fontSize={12} tickLine={false} axisLine={false} />
                 <YAxis
-                  stroke={CHART_STROKE}
-                  fontSize={11}
-                  fontFamily="var(--font-hud-mono)"
+                  stroke="#5b7083"
+                  fontSize={12}
                   tickLine={false}
                   axisLine={false}
                   unit={equivalences ? " eq" : " km"}
-                  width={52}
+                  width={56}
                 />
                 <Tooltip
-                  contentStyle={TOOLTIP_STYLE}
+                  cursor={{ fill: "rgba(14,34,54,0.04)" }}
+                  contentStyle={{
+                    background: "#ffffff",
+                    border: "1px solid #dde5eb",
+                    borderRadius: 14,
+                    color: "#0e2236",
+                    boxShadow: "0 8px 24px rgba(14,34,54,0.08)",
+                    fontSize: 13,
+                  }}
                   formatter={(value, name, item) => {
-                    const labels: Record<string, string> = {
-                      running_km: "Running",
-                      cycling_km: "Cycling",
-                      swimming_km: "Swimming",
-                    };
-                    const actualKey: Record<string, string> = {
-                      running_km: "running_actual",
-                      cycling_km: "cycling_actual",
-                      swimming_km: "swimming_actual",
-                    };
-                    const n = String(name);
+                    const sport = SPORTS.find((s) => KEY[s] === name);
                     const num = typeof value === "number" ? value : Number(value ?? 0);
-                    const payload = item?.payload as Record<string, number> | undefined;
-                    const actual = payload?.[actualKey[n] ?? ""] ?? num;
-                    if (equivalences) {
-                      return [
-                        `${num.toFixed(1)} eq (${actual.toFixed(1)} km)`,
-                        labels[n] ?? n,
-                      ];
-                    }
-                    return [`${num.toFixed(1)} km`, labels[n] ?? n];
+                    const actual = (item?.payload as { actual?: Record<string, number> })?.actual?.[String(name)] ?? num;
+                    const label = sport ? SPORT_NAME[sport] : String(name);
+                    return equivalences
+                      ? [`${num.toFixed(1)} eq (${actual.toFixed(1)} km)`, label]
+                      : [`${num.toFixed(1)} km`, label];
                   }}
                 />
-                <Legend
-                  formatter={(value: string) =>
-                    ({
-                      running_km: "Running",
-                      cycling_km: "Cycling",
-                      swimming_km: "Swimming",
-                    } as Record<string, string>)[value] ?? value
-                  }
-                  wrapperStyle={{ fontFamily: "var(--font-hud-mono)", fontSize: 11 }}
-                />
-                <Bar dataKey="running_km" fill={SPORT_COLORS.running} radius={[2, 2, 0, 0]} />
-                <Bar dataKey="cycling_km" fill={SPORT_COLORS.cycling} radius={[2, 2, 0, 0]} />
-                <Bar dataKey="swimming_km" fill={SPORT_COLORS.swimming} radius={[2, 2, 0, 0]} />
+                {SPORTS.map((sport) => (
+                  <Bar key={sport} dataKey={KEY[sport]} fill={SPORT_HEX[sport]} radius={[6, 6, 0, 0]} />
+                ))}
               </BarChart>
             </ResponsiveContainer>
           )}
         </div>
-      </Card>
+      </Section>
 
-      <section className="mt-10">
-        <h2 className="hud-label mb-4">This week</h2>
+      <Section className="mt-20" title="This week">
         {listLoading ? (
-          <div className="flex h-24 items-center justify-center">
-            <div className="hud-spinner" />
-          </div>
+          <Spinner />
         ) : thisWeek.length === 0 ? (
-          <div className="hud-panel border-dashed px-5 py-10 text-center font-mono text-sm text-[var(--muted)]">
-            No activities this week
-          </div>
+          <p className="rounded-[20px] bg-haze px-6 py-8 text-slate">Nothing logged since Monday.</p>
         ) : (
-          <div className="space-y-3">
-            {thisWeek.map((activity) => (
-              <ActivityRow key={activity.id} activity={activity} showDate />
-            ))}
-          </div>
+          <ActivityList activities={thisWeek} />
         )}
-      </section>
+      </Section>
 
-      {previous.length > 0 ? (
-        <section className="mt-10">
-          <h2 className="hud-label mb-4">Previous</h2>
-          <div className="space-y-3">
-            {previous.map((activity) => (
-              <ActivityRow key={activity.id} activity={activity} showDate />
-            ))}
-          </div>
-        </section>
+      {earlier.length > 0 ? (
+        <Section className="mt-16" title="Earlier">
+          <ActivityList activities={earlier} />
+        </Section>
       ) : null}
     </div>
   );

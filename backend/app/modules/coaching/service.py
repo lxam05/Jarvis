@@ -275,58 +275,28 @@ async def on_domain_event(event: DomainEvent) -> None:
 
 
 async def latest_recovery_rows(db: AsyncSession, user_id: uuid.UUID):
-    """Today's sleep/daily/HRV rows, falling back to the newest synced day.
+    """Newest sleep, daily summary and HRV rows on or before today.
 
-    Returns (sleep, daily, hrv, metrics_day).
+    Garmin publishes these on different schedules (a day can have a summary but no
+    sleep yet), so each comes from its own latest day instead of one shared day.
+    Returns (sleep, daily, hrv, metrics_day) where metrics_day is the newest of them.
     """
     today = date.today()
-    sleep_result = await db.execute(
-        select(GarminSleep).where(GarminSleep.user_id == user_id, GarminSleep.day == today)
-    )
-    sleep = sleep_result.scalar_one_or_none()
-    daily_result = await db.execute(
-        select(GarminDailySummary).where(GarminDailySummary.user_id == user_id, GarminDailySummary.day == today)
-    )
-    daily = daily_result.scalar_one_or_none()
-    hrv_result = await db.execute(
-        select(GarminHrv).where(GarminHrv.user_id == user_id, GarminHrv.day == today)
-    )
-    hrv = hrv_result.scalar_one_or_none()
-    metrics_day = today
 
-    if sleep is None and daily is None:
-        latest_daily = await db.execute(
-            select(GarminDailySummary)
-            .where(GarminDailySummary.user_id == user_id)
-            .order_by(GarminDailySummary.day.desc())
+    async def latest(model):
+        result = await db.execute(
+            select(model)
+            .where(model.user_id == user_id, model.day <= today)
+            .order_by(model.day.desc())
             .limit(1)
         )
-        daily = latest_daily.scalar_one_or_none()
-        if daily is not None:
-            metrics_day = daily.day
-            sleep_result = await db.execute(
-                select(GarminSleep).where(GarminSleep.user_id == user_id, GarminSleep.day == metrics_day)
-            )
-            sleep = sleep_result.scalar_one_or_none()
-            hrv_result = await db.execute(
-                select(GarminHrv).where(GarminHrv.user_id == user_id, GarminHrv.day == metrics_day)
-            )
-            hrv = hrv_result.scalar_one_or_none()
-        else:
-            latest_sleep = await db.execute(
-                select(GarminSleep)
-                .where(GarminSleep.user_id == user_id)
-                .order_by(GarminSleep.day.desc())
-                .limit(1)
-            )
-            sleep = latest_sleep.scalar_one_or_none()
-            if sleep is not None:
-                metrics_day = sleep.day
-                hrv_result = await db.execute(
-                    select(GarminHrv).where(GarminHrv.user_id == user_id, GarminHrv.day == metrics_day)
-                )
-                hrv = hrv_result.scalar_one_or_none()
+        return result.scalar_one_or_none()
 
+    sleep = await latest(GarminSleep)
+    daily = await latest(GarminDailySummary)
+    hrv = await latest(GarminHrv)
+    days = [row.day for row in (sleep, daily, hrv) if row is not None]
+    metrics_day = max(days) if days else today
     return sleep, daily, hrv, metrics_day
 
 

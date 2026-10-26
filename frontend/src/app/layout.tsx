@@ -1,23 +1,23 @@
 import type { Metadata } from "next";
-import { Orbitron, Share_Tech_Mono } from "next/font/google";
+import { Bricolage_Grotesque, Instrument_Sans } from "next/font/google";
 import { Providers } from "@/components/providers";
 import "./globals.css";
 
-const hudSans = Orbitron({
-  variable: "--font-hud-sans",
+const display = Bricolage_Grotesque({
+  variable: "--font-display",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+  axes: ["opsz", "wdth"],
 });
 
-const hudMono = Share_Tech_Mono({
-  variable: "--font-hud-mono",
+const body = Instrument_Sans({
+  variable: "--font-body",
   subsets: ["latin"],
-  weight: "400",
+  axes: ["wdth"],
 });
 
 export const metadata: Metadata = {
-  title: "JARVIS",
-  description: "Personal AI operating system",
+  title: "brick",
+  description: "Your training, recovery and coach in one place",
 };
 
 export default function RootLayout({
@@ -26,8 +26,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${hudSans.variable} ${hudMono.variable} dark h-full antialiased`}>
-      <body className="min-h-full bg-[#02060c] text-[#e0f7ff]">
+    <html lang="en" className={`${display.variable} ${body.variable} h-full`}>
+      <body className="min-h-full bg-paper text-ink">
         <Providers>{children}</Providers>
       </body>
     </html>
