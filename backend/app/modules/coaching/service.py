@@ -283,18 +283,19 @@ async def latest_recovery_rows(db: AsyncSession, user_id: uuid.UUID):
     """
     today = date.today()
 
-    async def latest(model):
+    async def latest(model, has_value):
+        # Skip placeholder rows (e.g. a night Garmin hasn't scored yet).
         result = await db.execute(
             select(model)
-            .where(model.user_id == user_id, model.day <= today)
+            .where(model.user_id == user_id, model.day <= today, has_value.is_not(None))
             .order_by(model.day.desc())
             .limit(1)
         )
         return result.scalar_one_or_none()
 
-    sleep = await latest(GarminSleep)
-    daily = await latest(GarminDailySummary)
-    hrv = await latest(GarminHrv)
+    sleep = await latest(GarminSleep, GarminSleep.score)
+    daily = await latest(GarminDailySummary, GarminDailySummary.bb_min)
+    hrv = await latest(GarminHrv, GarminHrv.last_night_avg_ms)
     days = [row.day for row in (sleep, daily, hrv) if row is not None]
     metrics_day = max(days) if days else today
     return sleep, daily, hrv, metrics_day

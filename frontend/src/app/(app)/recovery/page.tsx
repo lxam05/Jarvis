@@ -59,7 +59,7 @@ export default function RecoveryPage() {
             label="HRV"
             value={r.hrv_ms ?? "—"}
             unit="ms"
-            note={r.hrv_status ? <span className="capitalize">{r.hrv_status.toLowerCase()}</span> : "No data"}
+            note={r.hrv_status && r.hrv_status !== "NONE" ? <span className="capitalize">{r.hrv_status.toLowerCase()}</span> : "No status yet"}
           />
         </Panel>
         <Panel>

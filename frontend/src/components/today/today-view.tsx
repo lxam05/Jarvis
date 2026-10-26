@@ -128,7 +128,7 @@ function RecoveryPanel({ data }: { data: DashboardToday }) {
         <div>
           <dt className="text-[0.82rem] text-slate">HRV</dt>
           <dd className="num mt-0.5 text-[1.15rem] font-semibold">{r.hrv_ms != null ? `${r.hrv_ms} ms` : "—"}</dd>
-          <dd className="text-[0.82rem] capitalize text-slate">{r.hrv_status?.toLowerCase() ?? ""}</dd>
+          <dd className="text-[0.82rem] capitalize text-slate">{(r.hrv_status && r.hrv_status !== "NONE" ? r.hrv_status.toLowerCase() : null) ?? ""}</dd>
         </div>
         <div>
           <dt className="text-[0.82rem] text-slate">Body battery</dt>
