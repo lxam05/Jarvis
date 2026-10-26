@@ -15,15 +15,13 @@ class Settings(BaseSettings):
     environment: str = "development"
     openai_model: str = "gpt-4o"
     openai_embedding_model: str = "text-embedding-3-small"
-    meal_confidence_threshold: float = 0.75
-    # Target race for session coaching (Half Ironman).
-    half_ironman_race_date: str = "2026-09-13"
-    # Read-only Stripe secret (or restricted key) for business metrics.
-    stripe_secret_key: str = ""
-    # Railway account/project token for runtime logs on the Business page.
-    railway_token: str = ""
-    railway_environment_id: str = ""
-    railway_service_id: str = ""
+    # Strava API app (https://www.strava.com/settings/api).
+    strava_client_id: str = ""
+    strava_client_secret: str = ""
+    # Public base URL of this API; Strava redirects back to {public_api_url}/v1/strava/callback.
+    public_api_url: str = "http://localhost:8000"
+    # Where the browser lands after connecting Strava.
+    frontend_url: str = "http://localhost:3000"
 
     @property
     def cors_origin_list(self) -> list[str]:

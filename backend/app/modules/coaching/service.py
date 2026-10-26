@@ -1,7 +1,9 @@
 import json
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
+from fastapi import HTTPException, status
 from openai import AsyncOpenAI
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +14,7 @@ from app.core.events import DomainEvent
 from app.modules.coaching.models import CoachingInsight
 from app.modules.coaching.schemas import (
     ActivitySummary,
+    ChatMessage,
     CoachingContext,
     CoachingFlag,
     InsightOutput,
@@ -19,10 +22,49 @@ from app.modules.coaching.schemas import (
     SportSession,
 )
 from app.modules.core.models import UserSettings
-from app.modules.garmin.models import GarminActivity, GarminDailySummary, GarminHrv, GarminSleep
-from app.modules.nutrition.models import BodyWeightEntry, Meal
+from app.modules.garmin.models import GarminDailySummary, GarminHrv, GarminSleep
+from app.modules.strava.models import StravaActivity
 
 client = AsyncOpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
+
+SPORTS = ("running", "cycling", "swimming")
+
+
+@dataclass
+class RaceInfo:
+    name: str | None
+    race_date: date | None
+    weeks_to_race: int | None
+    phase: str
+
+
+def _phase_for_weeks(weeks: int | None) -> str:
+    if weeks is None:
+        return "base"
+    if weeks <= 0:
+        return "race"
+    if weeks <= 2:
+        return "taper"
+    if weeks <= 4:
+        return "peak"
+    if weeks <= 6:
+        return "build"
+    return "base"
+
+
+async def get_race(db: AsyncSession, user_id: uuid.UUID) -> RaceInfo:
+    """Upcoming race from Settings; a past or missing race means general base training."""
+    user_settings = await db.get(UserSettings, user_id)
+    race_date = user_settings.race_date if user_settings else None
+    if race_date is None or race_date < date.today():
+        return RaceInfo(name=None, race_date=None, weeks_to_race=None, phase="base")
+    weeks = (race_date - date.today()).days // 7
+    return RaceInfo(
+        name=(user_settings.race_name or "Race"),
+        race_date=race_date,
+        weeks_to_race=weeks,
+        phase=_phase_for_weeks(weeks),
+    )
 
 
 async def build_context(db: AsyncSession, user_id: uuid.UUID, target_date: date | None = None) -> CoachingContext:
@@ -47,17 +89,17 @@ async def build_context(db: AsyncSession, user_id: uuid.UUID, target_date: date 
 
     week_start = start - timedelta(days=7)
     load_result = await db.execute(
-        select(func.coalesce(func.sum(GarminActivity.training_load), 0)).where(
-            GarminActivity.user_id == user_id,
-            GarminActivity.start_at >= week_start,
+        select(func.coalesce(func.sum(StravaActivity.training_load), 0)).where(
+            StravaActivity.user_id == user_id,
+            StravaActivity.start_at >= week_start,
         )
     )
     training_load_7d = float(load_result.scalar_one() or 0)
 
     act_result = await db.execute(
-        select(GarminActivity)
-        .where(GarminActivity.user_id == user_id, GarminActivity.start_at >= start, GarminActivity.start_at < end)
-        .order_by(GarminActivity.start_at.desc())
+        select(StravaActivity)
+        .where(StravaActivity.user_id == user_id, StravaActivity.start_at >= start, StravaActivity.start_at < end)
+        .order_by(StravaActivity.start_at.desc())
     )
     activities = [
         ActivitySummary(
@@ -65,33 +107,10 @@ async def build_context(db: AsyncSession, user_id: uuid.UUID, target_date: date 
             sport=a.sport,
             start_at=a.start_at,
             calories=a.calories,
-            duration_seconds=a.elapsed_seconds,
+            duration_seconds=a.moving_seconds or a.elapsed_seconds,
         )
         for a in act_result.scalars()
     ]
-
-    meal_result = await db.execute(
-        select(
-            func.coalesce(func.sum(Meal.calories), 0),
-            func.coalesce(func.sum(Meal.protein_g), 0),
-        ).where(
-            Meal.user_id == user_id,
-            Meal.status == "confirmed",
-            Meal.logged_at >= start,
-            Meal.logged_at < end,
-        )
-    )
-    cal_row = meal_result.one()
-
-    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
-    user_settings = settings_result.scalar_one_or_none()
-
-    weight_result = await db.execute(
-        select(BodyWeightEntry.weight_kg)
-        .where(BodyWeightEntry.user_id == user_id, BodyWeightEntry.measured_at >= week_start)
-        .order_by(BodyWeightEntry.measured_at.asc())
-    )
-    weight_trend = [float(w) for w in weight_result.scalars()]
 
     recovery = _compute_recovery_score(sleep, hrv, daily)
 
@@ -104,11 +123,6 @@ async def build_context(db: AsyncSession, user_id: uuid.UUID, target_date: date 
         stress_avg=daily.stress_avg if daily else None,
         training_load_7d=training_load_7d,
         activities_today=activities,
-        calories_consumed=int(cal_row[0]),
-        calories_goal=user_settings.calorie_goal if user_settings else None,
-        protein_consumed_g=float(cal_row[1]),
-        protein_goal_g=user_settings.protein_goal_g if user_settings else None,
-        weight_trend_7d=weight_trend,
         recovery_score=recovery,
     )
 
@@ -129,43 +143,6 @@ def _compute_recovery_score(sleep, hrv, daily) -> float:
 
 def run_rule_engine(ctx: CoachingContext) -> list[CoachingFlag]:
     flags: list[CoachingFlag] = []
-
-    if ctx.calories_goal:
-        remaining = ctx.calories_goal - ctx.calories_consumed
-        if remaining > 800:
-            flags.append(
-                CoachingFlag(
-                    category="nutrition",
-                    severity="info",
-                    code="calories_short",
-                    message=f"You're {remaining} kcal short of your goal.",
-                    data={"remaining": remaining},
-                )
-            )
-        elif remaining < -300:
-            flags.append(
-                CoachingFlag(
-                    category="nutrition",
-                    severity="warning",
-                    code="calories_over",
-                    message=f"You're {abs(remaining)} kcal over your goal.",
-                    data={"over": abs(remaining)},
-                )
-            )
-
-    if ctx.protein_goal_g:
-        pct = ctx.protein_consumed_g / ctx.protein_goal_g
-        if pct < 0.7:
-            remaining = ctx.protein_goal_g - ctx.protein_consumed_g
-            flags.append(
-                CoachingFlag(
-                    category="nutrition",
-                    severity="warning",
-                    code="protein_low",
-                    message=f"Protein is low — {ctx.protein_consumed_g:.0f}g of {ctx.protein_goal_g}g target.",
-                    data={"remaining_g": remaining},
-                )
-            )
 
     if ctx.sleep_score is not None and ctx.sleep_score < 60:
         flags.append(
@@ -200,6 +177,7 @@ def run_rule_engine(ctx: CoachingContext) -> list[CoachingFlag]:
             )
         )
 
+    # Strava relative effort: ~500/week is a big training week for most amateurs.
     if ctx.training_load_7d > 500 and ctx.recovery_score < 50:
         flags.append(
             CoachingFlag(
@@ -232,7 +210,7 @@ async def synthesize_insights(ctx: CoachingContext, flags: list[CoachingFlag]) -
                 {
                     "role": "system",
                     "content": (
-                        "You are a fitness coach. Given context and rule flags, produce 1-3 concise, "
+                        "You are an endurance coach. Given context and rule flags, produce 1-3 concise, "
                         "actionable insights. Return JSON array of objects with category, severity, title, body."
                     ),
                 },
@@ -290,33 +268,17 @@ async def regenerate_insights(db: AsyncSession, user_id: uuid.UUID) -> None:
 
 
 async def on_domain_event(event: DomainEvent) -> None:
-    if event.name in ("garmin.synced", "meal.logged", "weight.updated"):
+    if event.name in ("garmin.synced", "strava.synced"):
         user_id = uuid.UUID(event.payload["user_id"])
         async with session_scope() as db:
             await regenerate_insights(db, user_id)
 
 
-def _parse_race_date() -> date:
-    try:
-        return date.fromisoformat(settings.half_ironman_race_date)
-    except ValueError:
-        return date.today() + timedelta(weeks=8)
+async def latest_recovery_rows(db: AsyncSession, user_id: uuid.UUID):
+    """Today's sleep/daily/HRV rows, falling back to the newest synced day.
 
-
-def _phase_for_weeks(weeks: int) -> str:
-    if weeks <= 0:
-        return "race"
-    if weeks <= 2:
-        return "taper"
-    if weeks <= 4:
-        return "peak"
-    if weeks <= 6:
-        return "build"
-    return "base"
-
-
-async def _latest_recovery(db: AsyncSession, user_id: uuid.UUID) -> tuple[float, int | None, str | None]:
-    """Prefer today; fall back to newest sleep/daily day (same as dashboard)."""
+    Returns (sleep, daily, hrv, metrics_day).
+    """
     today = date.today()
     sleep_result = await db.execute(
         select(GarminSleep).where(GarminSleep.user_id == user_id, GarminSleep.day == today)
@@ -365,6 +327,11 @@ async def _latest_recovery(db: AsyncSession, user_id: uuid.UUID) -> tuple[float,
                 )
                 hrv = hrv_result.scalar_one_or_none()
 
+    return sleep, daily, hrv, metrics_day
+
+
+async def _latest_recovery(db: AsyncSession, user_id: uuid.UUID) -> tuple[float, int | None, str | None]:
+    sleep, daily, hrv, _ = await latest_recovery_rows(db, user_id)
     recovery = _compute_recovery_score(sleep, hrv, daily)
     return recovery, sleep.score if sleep else None, hrv.status if hrv else None
 
@@ -372,12 +339,12 @@ async def _latest_recovery(db: AsyncSession, user_id: uuid.UUID) -> tuple[float,
 async def _sport_volume_7d(db: AsyncSession, user_id: uuid.UUID) -> dict[str, float]:
     since = datetime.now(UTC) - timedelta(days=7)
     result = await db.execute(
-        select(GarminActivity.sport, GarminActivity.distance_m).where(
-            GarminActivity.user_id == user_id,
-            GarminActivity.start_at >= since,
+        select(StravaActivity.sport, StravaActivity.distance_m).where(
+            StravaActivity.user_id == user_id,
+            StravaActivity.start_at >= since,
         )
     )
-    volumes = {"running": 0.0, "cycling": 0.0, "swimming": 0.0}
+    volumes = {s: 0.0 for s in SPORTS}
     for sport, distance_m in result.all():
         key = (sport or "").lower().strip()
         if key in volumes:
@@ -386,12 +353,12 @@ async def _sport_volume_7d(db: AsyncSession, user_id: uuid.UUID) -> dict[str, fl
 
 
 async def _days_since_sport(db: AsyncSession, user_id: uuid.UUID) -> dict[str, int]:
-    out = {"running": 99, "cycling": 99, "swimming": 99}
+    out = {s: 99 for s in SPORTS}
     for sport in out:
         result = await db.execute(
-            select(GarminActivity.start_at)
-            .where(GarminActivity.user_id == user_id, func.lower(GarminActivity.sport) == sport)
-            .order_by(GarminActivity.start_at.desc())
+            select(StravaActivity.start_at)
+            .where(StravaActivity.user_id == user_id, StravaActivity.sport == sport)
+            .order_by(StravaActivity.start_at.desc())
             .limit(1)
         )
         start_at = result.scalar_one_or_none()
@@ -500,14 +467,13 @@ def _build_sessions(phase: str, recovery: float, recommended: str) -> list[Sport
 
 
 async def recommend_session(db: AsyncSession, user_id: uuid.UUID) -> SessionRecommendationResponse:
-    race_date = _parse_race_date()
-    weeks = max(0, (race_date - date.today()).days // 7)
-    phase = _phase_for_weeks(weeks)
+    race = await get_race(db, user_id)
+    phase = race.phase
     recovery, sleep_score, hrv_status = await _latest_recovery(db, user_id)
     volumes = await _sport_volume_7d(db, user_id)
     days_since = await _days_since_sport(db, user_id)
 
-    # HIM emphasis: bike > run > swim for volume, but rotate neglected sports.
+    # Triathlon emphasis: bike > run > swim for volume, but rotate neglected sports.
     need = {
         "cycling": days_since["cycling"] * 1.2 + (40 - min(volumes["cycling"], 40)) * 0.15,
         "running": days_since["running"] * 1.0 + (25 - min(volumes["running"], 25)) * 0.2,
@@ -538,9 +504,10 @@ async def recommend_session(db: AsyncSession, user_id: uuid.UUID) -> SessionReco
         f"Last 7d mix: run {volumes['running']:.1f} km · ride {volumes['cycling']:.1f} km · "
         f"swim {volumes['swimming']:.1f} km."
     )
+    race_bit = f"{race.weeks_to_race}w to {race.name}" if race.race_date else "no race set"
     reasons.append(
         f"{recommended.capitalize()} is the priority today "
-        f"({days_since[recommended]}d since last, phase={phase}, {weeks}w to race)."
+        f"({days_since[recommended]}d since last, phase={phase}, {race_bit})."
     )
     reason = " ".join(reasons)
 
@@ -555,7 +522,7 @@ async def recommend_session(db: AsyncSession, user_id: uuid.UUID) -> SessionReco
                     {
                         "role": "system",
                         "content": (
-                            "You are a Half Ironman coach. Given recovery + recent training, "
+                            "You are a triathlon coach. Given recovery + recent training, "
                             "return JSON with keys: recommended_sport (running|cycling|swimming), "
                             "reason (2 short sentences), sessions (array of 3 objects with sport, title, "
                             "duration_min, intensity, description, focus). Keep sessions practical."
@@ -565,7 +532,8 @@ async def recommend_session(db: AsyncSession, user_id: uuid.UUID) -> SessionReco
                         "role": "user",
                         "content": json.dumps(
                             {
-                                "weeks_to_race": weeks,
+                                "race": race.name,
+                                "weeks_to_race": race.weeks_to_race,
                                 "phase": phase,
                                 "recovery_score": recovery,
                                 "sleep_score": sleep_score,
@@ -581,21 +549,21 @@ async def recommend_session(db: AsyncSession, user_id: uuid.UUID) -> SessionReco
                 response_format={"type": "json_object"},
             )
             data = json.loads(response.choices[0].message.content or "{}")
-            if data.get("recommended_sport") in ("running", "cycling", "swimming"):
+            if data.get("recommended_sport") in SPORTS:
                 recommended = data["recommended_sport"]
             if data.get("reason"):
                 reason = str(data["reason"])
             if isinstance(data.get("sessions"), list) and len(data["sessions"]) >= 3:
                 parsed = [SportSession(**item) for item in data["sessions"][:3]]
-                if {s.sport for s in parsed} >= {"running", "cycling", "swimming"}:
+                if {s.sport for s in parsed} >= set(SPORTS):
                     sessions = sorted(parsed, key=lambda s: 0 if s.sport == recommended else 1)
         except Exception:
             pass
 
     return SessionRecommendationResponse(
-        race_name="Half Ironman",
-        race_date=race_date,
-        weeks_to_race=weeks,
+        race_name=race.name,
+        race_date=race.race_date,
+        weeks_to_race=race.weeks_to_race,
         phase=phase,
         recovery_score=recovery,
         sleep_score=sleep_score,
@@ -605,3 +573,147 @@ async def recommend_session(db: AsyncSession, user_id: uuid.UUID) -> SessionReco
         sessions=sessions,
         recent_mix={k: round(v, 2) for k, v in volumes.items()},
     )
+
+
+COACH_SYSTEM_PROMPT = """You are the athlete's personal endurance coach (run, bike, swim / triathlon).
+You get a JSON snapshot of their real data: Strava activities, weekly volume, and Garmin recovery
+(sleep, HRV, body battery, resting HR). Answer their question using that data.
+
+- Be specific: cite actual sessions, dates, distances, paces and trends from the snapshot.
+- Be concise and practical. Use km, min/km for running, km/h for cycling, min/100m for swimming.
+- If the data needed to answer is missing or stale, say so plainly instead of guessing.
+- Give training advice, not medical diagnoses; suggest seeing a professional for pain or injury."""
+
+CHAT_HISTORY_LIMIT = 20
+
+
+def _pace_summary(a: StravaActivity) -> str | None:
+    if not a.distance_m or not a.moving_seconds:
+        return None
+    km = float(a.distance_m) / 1000.0
+    if km <= 0:
+        return None
+    if a.sport == "running":
+        sec = a.moving_seconds / km
+        return f"{int(sec // 60)}:{int(sec % 60):02d} min/km"
+    if a.sport == "swimming":
+        sec = a.moving_seconds / (km * 10)
+        return f"{int(sec // 60)}:{int(sec % 60):02d} min/100m"
+    return f"{km / (a.moving_seconds / 3600):.1f} km/h"
+
+
+async def _coach_snapshot(db: AsyncSession, user_id: uuid.UUID) -> dict:
+    today = date.today()
+    race = await get_race(db, user_id)
+    sleep, daily, hrv, metrics_day = await latest_recovery_rows(db, user_id)
+
+    acts = await db.execute(
+        select(StravaActivity)
+        .where(StravaActivity.user_id == user_id)
+        .order_by(StravaActivity.start_at.desc())
+        .limit(30)
+    )
+    recent = [
+        {
+            "date": a.start_at.date().isoformat(),
+            "sport": a.sport_type or a.sport,
+            "name": a.name,
+            "distance_km": round(float(a.distance_m) / 1000, 2) if a.distance_m else None,
+            "moving_min": round(a.moving_seconds / 60) if a.moving_seconds else None,
+            "pace_or_speed": _pace_summary(a),
+            "elevation_m": round(float(a.elevation_gain_m)) if a.elevation_gain_m else None,
+            "avg_hr": a.avg_hr,
+            "max_hr": a.max_hr,
+            "avg_watts": float(a.avg_watts) if a.avg_watts else None,
+            "relative_effort": float(a.training_load) if a.training_load else None,
+        }
+        for a in acts.scalars()
+    ]
+
+    weeks = 12
+    monday = today - timedelta(days=today.weekday())
+    since = datetime.combine(monday - timedelta(weeks=weeks - 1), datetime.min.time(), tzinfo=UTC)
+    vol = await db.execute(
+        select(StravaActivity.sport, StravaActivity.start_at, StravaActivity.distance_m, StravaActivity.moving_seconds)
+        .where(StravaActivity.user_id == user_id, StravaActivity.start_at >= since)
+    )
+    weekly: dict[str, dict] = {}
+    for i in range(weeks):
+        wk = (monday - timedelta(weeks=weeks - 1 - i)).isoformat()
+        weekly[wk] = {"run_km": 0.0, "ride_km": 0.0, "swim_km": 0.0, "hours": 0.0, "sessions": 0}
+    keys = {"running": "run_km", "cycling": "ride_km", "swimming": "swim_km"}
+    for sport, start_at, distance_m, moving in vol.all():
+        d = start_at.astimezone(UTC).date()
+        wk = (d - timedelta(days=d.weekday())).isoformat()
+        if wk not in weekly:
+            continue
+        row = weekly[wk]
+        row["sessions"] += 1
+        row["hours"] += (moving or 0) / 3600
+        if sport in keys and distance_m:
+            row[keys[sport]] += float(distance_m) / 1000
+    weekly_volume = [
+        {"week_of": wk, **{k: round(v, 1) if isinstance(v, float) else v for k, v in row.items()}}
+        for wk, row in weekly.items()
+    ]
+
+    recovery_since = today - timedelta(days=14)
+    sleep_rows = await db.execute(
+        select(GarminSleep.day, GarminSleep.score, GarminSleep.total_seconds)
+        .where(GarminSleep.user_id == user_id, GarminSleep.day >= recovery_since)
+        .order_by(GarminSleep.day)
+    )
+    hrv_rows = await db.execute(
+        select(GarminHrv.day, GarminHrv.last_night_avg_ms, GarminHrv.status)
+        .where(GarminHrv.user_id == user_id, GarminHrv.day >= recovery_since)
+    )
+    daily_rows = await db.execute(
+        select(GarminDailySummary.day, GarminDailySummary.rhr, GarminDailySummary.bb_max)
+        .where(GarminDailySummary.user_id == user_id, GarminDailySummary.day >= recovery_since)
+    )
+    trend: dict[date, dict] = {}
+    for day, score, total in sleep_rows.all():
+        trend.setdefault(day, {})["sleep_score"] = score
+        trend[day]["sleep_h"] = round(total / 3600, 1) if total else None
+    for day, ms, hrv_status in hrv_rows.all():
+        trend.setdefault(day, {}).update({"hrv_ms": ms, "hrv_status": hrv_status})
+    for day, rhr, bb in daily_rows.all():
+        trend.setdefault(day, {}).update({"rhr": rhr, "body_battery_max": bb})
+
+    return {
+        "today": today.isoformat(),
+        "race": (
+            {"name": race.name, "date": race.race_date.isoformat(), "weeks_to_go": race.weeks_to_race}
+            if race.race_date
+            else None
+        ),
+        "training_phase": race.phase,
+        "recovery_latest": {
+            "as_of": metrics_day.isoformat(),
+            "recovery_score": round(_compute_recovery_score(sleep, hrv, daily)),
+            "sleep_score": sleep.score if sleep else None,
+            "hrv_ms": hrv.last_night_avg_ms if hrv else None,
+            "hrv_status": hrv.status if hrv else None,
+            "body_battery_min": daily.bb_min if daily else None,
+            "resting_hr": daily.rhr if daily else None,
+        },
+        "recovery_last_14d": [{"day": d.isoformat(), **v} for d, v in sorted(trend.items())],
+        "weekly_volume_last_12w": weekly_volume,
+        "recent_activities": recent,
+    }
+
+
+async def chat_with_coach(db: AsyncSession, user_id: uuid.UUID, messages: list[ChatMessage]) -> str:
+    if not (client and settings.openai_api_key):
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Coach needs OPENAI_API_KEY set on the server")
+
+    snapshot = await _coach_snapshot(db, user_id)
+    response = await client.chat.completions.create(
+        model=settings.openai_model,
+        messages=[
+            {"role": "system", "content": COACH_SYSTEM_PROMPT},
+            {"role": "system", "content": "Athlete data snapshot:\n" + json.dumps(snapshot, default=str)},
+            *[{"role": m.role, "content": m.content} for m in messages[-CHAT_HISTORY_LIMIT:]],
+        ],
+    )
+    return response.choices[0].message.content or ""

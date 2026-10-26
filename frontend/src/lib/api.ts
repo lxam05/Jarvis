@@ -12,10 +12,11 @@ export type ActivitySummary = {
 
 export type ActivityDetail = {
   id: string;
-  garmin_activity_id: string;
+  strava_activity_id: number;
+  strava_url: string;
   name: string | null;
   sport: string | null;
-  sub_sport: string | null;
+  sport_type: string | null;
   start_at: string;
   elapsed_seconds: number | null;
   moving_seconds: number | null;
@@ -23,33 +24,28 @@ export type ActivityDetail = {
   calories: number | null;
   avg_hr: number | null;
   max_hr: number | null;
+  avg_watts: number | null;
   training_load: number | null;
-  training_effect: number | null;
   ascent_m: number | null;
-  descent_m: number | null;
   avg_speed_mps: number | null;
   max_speed_mps: number | null;
   route: [number, number][];
 };
 
+export type RaceReadiness = {
+  overall: number;
+  status: string;
+  weeks_to_race: number | null;
+  phase: string;
+  race_name: string | null;
+  race_date: string | null;
+  readiness: { score: number; label: string; detail: string };
+  training: { score: number; label: string; detail: string };
+  summary: string;
+};
+
 export type DashboardToday = {
   date: string;
-  macros: {
-    calories: number;
-    protein_g: number;
-    carbs_g: number;
-    fat_g: number;
-    calorie_goal: number | null;
-    protein_goal_g: number | null;
-    calories_remaining: number | null;
-    protein_remaining_g: number | null;
-  };
-  weight: {
-    current_kg: number | null;
-    goal_kg: number | null;
-    weekly_change_kg: number | null;
-    trend_7d: number[];
-  };
   recovery: {
     sleep_score: number | null;
     sleep_hours: number | null;
@@ -64,72 +60,27 @@ export type DashboardToday = {
     activities_today: ActivitySummary[];
     weekly_load: number;
     weekly_activities: number;
-    total_calories_burned_today: number;
   };
-  streaks: { logging_streak_days: number; training_streak_days: number };
-  goals: {
-    calorie_goal: number | null;
-    protein_goal_g: number | null;
-    step_goal: number | null;
-    steps_today: number | null;
-  };
+  streaks: { training_streak_days: number };
   recent_activities: ActivitySummary[];
   insights: Array<{ title: string; body: string; category: string; severity: string }>;
   last_garmin_sync: string | null;
-  calories_burned: number;
+  last_strava_sync: string | null;
   garmin_metrics_as_of: string | null;
-  him_readiness?: {
-    overall: number;
-    status: string;
-    weeks_to_race: number;
-    phase: string;
-    race_name: string;
-    race_date: string;
-    readiness: { score: number; label: string; detail: string };
-    food: { score: number; label: string; detail: string };
-    training: { score: number; label: string; detail: string };
-    summary: string;
-  } | null;
+  readiness: RaceReadiness | null;
 };
 
-export type Meal = {
-  id: string;
-  logged_at: string;
-  meal_type: string | null;
-  raw_input: string;
-  calories: number;
-  protein_g: number;
-  carbs_g: number;
-  fat_g: number;
-  confidence: number;
-  status: string;
-  items: Array<{
-    name: string;
-    quantity: string | null;
-    calories: number | null;
-    protein_g: number | null;
-    carbs_g: number | null;
-    fat_g: number | null;
-  }>;
+export type StravaStatus = {
+  configured: boolean;
+  connected: boolean;
+  athlete_name: string | null;
+  last_synced_at: string | null;
+  activity_count: number;
 };
 
-export type ChatResponse = {
-  conversation_id: string;
-  reply: string;
-  state: string;
-  meal_draft?: {
-    id: string;
-    parsed: {
-      total_calories: number;
-      total_protein_g: number;
-      total_carbs_g: number;
-      total_fat_g: number;
-      confidence: number;
-    };
-    raw_input: string;
-  };
-  follow_up_questions?: string[];
-};
+export type CoachMessage = { role: "user" | "assistant"; content: string };
+
+export type UserSettings = { race_name: string | null; race_date: string | null };
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -169,20 +120,10 @@ export const api = {
 
   dashboardToday: () => apiFetch<DashboardToday>("/v1/dashboard/today"),
 
-  getActivity: (id: string) => apiFetch<ActivityDetail>(`/v1/garmin/activities/${id}`),
+  getActivity: (id: string) => apiFetch<ActivityDetail>(`/v1/strava/activities/${id}`),
 
   listActivities: (limit = 60) =>
-    apiFetch<ActivitySummary[]>(`/v1/garmin/activities?limit=${limit}`),
-
-  weightTrend: (days = 30) =>
-    apiFetch<{ points: Array<{ date: string; weight_kg: number }> }>(
-      `/v1/dashboard/weight-trend?days=${days}`
-    ),
-
-  trainingWeek: () =>
-    apiFetch<{ days: Array<{ date: string; activities: number; calories: number }> }>(
-      "/v1/dashboard/training/week"
-    ),
+    apiFetch<ActivitySummary[]>(`/v1/strava/activities?limit=${limit}`),
 
   weeklySportDistance: (weeks = 8) =>
     apiFetch<{
@@ -202,20 +143,6 @@ export const api = {
       records_upserted: Record<string, number> | null;
     }>("/v1/garmin/sync/status"),
 
-  chat: (message: string, conversationId?: string) =>
-    apiFetch<ChatResponse>("/v1/nutrition/chat", {
-      method: "POST",
-      body: JSON.stringify({ message, conversation_id: conversationId }),
-    }),
-
-  confirmMeal: (mealId: string, saveAsTemplate = false, templateName?: string) =>
-    apiFetch<Meal>(`/v1/nutrition/meals/${mealId}/confirm`, {
-      method: "POST",
-      body: JSON.stringify({ save_as_template: saveAsTemplate, template_name: templateName }),
-    }),
-
-  mealsToday: () => apiFetch<Meal[]>("/v1/nutrition/meals/today"),
-
   insights: () =>
     apiFetch<Array<{ title: string; body: string; category: string; severity: string }>>(
       "/v1/coaching/insights"
@@ -223,9 +150,9 @@ export const api = {
 
   coachingSession: () =>
     apiFetch<{
-      race_name: string;
-      race_date: string;
-      weeks_to_race: number;
+      race_name: string | null;
+      race_date: string | null;
+      weeks_to_race: number | null;
       phase: string;
       recovery_score: number;
       sleep_score: number | null;
@@ -243,48 +170,30 @@ export const api = {
       recent_mix: Record<string, number>;
     }>("/v1/coaching/session"),
 
-  stripeOverview: () =>
-    apiFetch<{
-      configured: boolean;
-      currency: string;
-      balance_available: number;
-      balance_pending: number;
-      today: { revenue: number; charge_count: number; currency: string };
-      last_7d: { revenue: number; charge_count: number; currency: string };
-      last_30d: { revenue: number; charge_count: number; currency: string };
-      mrr: number | null;
-      active_subscriptions: number | null;
-      recent_charges: Array<{
-        id: string;
-        amount: number;
-        currency: string;
-        status: string;
-        description: string | null;
-        created_at: string;
-        customer_email: string | null;
-      }>;
-      recent_payouts: Array<{
-        id: string;
-        amount: number;
-        currency: string;
-        status: string;
-        arrival_date: string | null;
-        created_at: string;
-      }>;
-      recap: string;
-      dashboard_url: string;
-    }>("/v1/stripe/overview"),
+  getSettings: () => apiFetch<UserSettings>("/v1/auth/settings"),
 
-  stripeRuntimeLogs: (limit = 80) =>
-    apiFetch<{
-      lines: Array<{ timestamp: string | null; message: string; severity: string | null }>;
-      source: string;
-    }>(`/v1/stripe/runtime-logs?limit=${limit}`),
-
-  updateSettings: (settings: Record<string, number | null>) =>
+  updateSettings: (settings: UserSettings) =>
     apiFetch<{ ok: boolean }>("/v1/auth/settings", {
       method: "PUT",
       body: JSON.stringify(settings),
+    }),
+
+  stravaStatus: () => apiFetch<StravaStatus>("/v1/strava/status"),
+
+  stravaConnectUrl: () => apiFetch<{ url: string }>("/v1/strava/connect"),
+
+  stravaSync: () =>
+    apiFetch<{ activities_upserted: number; last_synced_at: string }>("/v1/strava/sync", {
+      method: "POST",
+    }),
+
+  stravaDisconnect: () =>
+    apiFetch<{ ok: boolean }>("/v1/strava/connection", { method: "DELETE" }),
+
+  coachChat: (messages: CoachMessage[]) =>
+    apiFetch<{ reply: string }>("/v1/coaching/chat", {
+      method: "POST",
+      body: JSON.stringify({ messages }),
     }),
 };
 

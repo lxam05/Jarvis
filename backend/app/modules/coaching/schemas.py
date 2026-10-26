@@ -1,7 +1,7 @@
-from datetime import date, datetime, timedelta
-from decimal import Decimal
+from datetime import date, datetime
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ActivitySummary(BaseModel):
@@ -21,11 +21,6 @@ class CoachingContext(BaseModel):
     stress_avg: int | None = None
     training_load_7d: float = 0
     activities_today: list[ActivitySummary] = []
-    calories_consumed: int = 0
-    calories_goal: int | None = None
-    protein_consumed_g: float = 0
-    protein_goal_g: int | None = None
-    weight_trend_7d: list[float] = []
     recovery_score: float = 50.0
 
 
@@ -54,9 +49,9 @@ class SportSession(BaseModel):
 
 
 class SessionRecommendationResponse(BaseModel):
-    race_name: str
-    race_date: date
-    weeks_to_race: int
+    race_name: str | None = None
+    race_date: date | None = None
+    weeks_to_race: int | None = None
     phase: str
     recovery_score: float
     sleep_score: int | None = None
@@ -66,3 +61,16 @@ class SessionRecommendationResponse(BaseModel):
     sessions: list[SportSession]
     recent_mix: dict[str, float] = {}
 
+
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=8000)
+
+
+class CoachChatRequest(BaseModel):
+    messages: list[ChatMessage] = Field(min_length=1)
+
+
+class CoachChatResponse(BaseModel):
+    reply: str

@@ -18,14 +18,7 @@ from app.modules.garmin.models import (  # noqa: F401
     GarminSyncRun,
     GarminWeight,
 )
-from app.modules.nutrition.models import (  # noqa: F401
-    BodyWeightEntry,
-    Meal,
-    MealItem,
-    MealTemplate,
-    NutritionConversation,
-    NutritionMessage,
-)
+from app.modules.strava.models import StravaActivity, StravaConnection  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url.replace("+asyncpg", ""))

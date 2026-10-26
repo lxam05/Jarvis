@@ -2,10 +2,9 @@
 
 REGISTERED_MODULES: list[str] = [
     "garmin",
-    "nutrition",
+    "strava",
     "coaching",
     "dashboard",
-    "stripe",
 ]
 
 

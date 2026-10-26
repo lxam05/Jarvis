@@ -3,41 +3,27 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.modules.coaching.models import CoachingInsight
-from app.modules.coaching.service import _compute_recovery_score, build_context
-from app.modules.core.models import UserSettings
+from app.modules.coaching.service import (
+    RaceInfo,
+    _compute_recovery_score,
+    get_race,
+    latest_recovery_rows,
+)
 from app.modules.dashboard.schemas import (
     DashboardTodayResponse,
-    GoalsCard,
-    HimPillarScore,
-    HimReadinessCard,
     InsightCard,
-    MacroSummary,
+    PillarScore,
+    RaceReadinessCard,
     RecoveryCard,
     StreakCard,
     TrainingCard,
     WeeklySportDistancePoint,
     WeeklySportDistanceResponse,
-    WeeklyTrainingResponse,
-    WeightCard,
-    WeightTrendPoint,
-    WeightTrendResponse,
 )
-from app.modules.garmin.models import GarminActivity, GarminDailySummary, GarminHrv, GarminSleep, GarminSyncRun
-from app.modules.nutrition.models import BodyWeightEntry, Meal
-
-
-def _activity_dict(a: GarminActivity) -> dict:
-    return {
-        "id": str(a.id),
-        "name": a.name,
-        "sport": a.sport,
-        "start_at": a.start_at.isoformat(),
-        "calories": a.calories,
-        "duration_seconds": a.elapsed_seconds,
-        "distance_m": float(a.distance_m) if a.distance_m else None,
-    }
+from app.modules.garmin.models import GarminSyncRun
+from app.modules.strava.models import StravaActivity, StravaConnection
+from app.modules.strava.service import activity_summary
 
 
 async def get_dashboard_today(db, user_id) -> DashboardTodayResponse:
@@ -45,114 +31,9 @@ async def get_dashboard_today(db, user_id) -> DashboardTodayResponse:
     start = datetime.combine(today, datetime.min.time(), tzinfo=UTC)
     end = start + timedelta(days=1)
 
-    settings_result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
-    settings = settings_result.scalar_one_or_none()
-
-    meal_totals = await db.execute(
-        select(
-            func.coalesce(func.sum(Meal.calories), 0),
-            func.coalesce(func.sum(Meal.protein_g), 0),
-            func.coalesce(func.sum(Meal.carbs_g), 0),
-            func.coalesce(func.sum(Meal.fat_g), 0),
-        ).where(
-            Meal.user_id == user_id,
-            Meal.status == "confirmed",
-            Meal.logged_at >= start,
-            Meal.logged_at < end,
-        )
-    )
-    mt = meal_totals.one()
-    cal_goal = settings.calorie_goal if settings else None
-    prot_goal = settings.protein_goal_g if settings else None
-
-    macros = MacroSummary(
-        calories=int(mt[0]),
-        protein_g=float(mt[1]),
-        carbs_g=float(mt[2]),
-        fat_g=float(mt[3]),
-        calorie_goal=cal_goal,
-        protein_goal_g=prot_goal,
-        calories_remaining=(cal_goal - int(mt[0])) if cal_goal else None,
-        protein_remaining_g=(prot_goal - float(mt[1])) if prot_goal else None,
-    )
-
-    weight_since = start - timedelta(days=30)
-    weight_rows = await db.execute(
-        select(BodyWeightEntry.weight_kg)
-        .where(BodyWeightEntry.user_id == user_id, BodyWeightEntry.measured_at >= weight_since)
-        .order_by(BodyWeightEntry.measured_at.asc())
-    )
-    weight_trend = [float(w) for w in weight_rows.scalars()]
-    if not weight_trend:
-        latest_weight = await db.execute(
-            select(BodyWeightEntry.weight_kg)
-            .where(BodyWeightEntry.user_id == user_id)
-            .order_by(BodyWeightEntry.measured_at.desc())
-            .limit(1)
-        )
-        w = latest_weight.scalar_one_or_none()
-        if w is not None:
-            weight_trend = [float(w)]
-
-    weight = WeightCard(
-        current_kg=weight_trend[-1] if weight_trend else None,
-        goal_kg=float(settings.goal_weight_kg) if settings and settings.goal_weight_kg else None,
-        weekly_change_kg=(
-            round(weight_trend[-1] - weight_trend[0], 2) if len(weight_trend) >= 2 else None
-        ),
-        trend_7d=weight_trend[-7:] if weight_trend else [],
-    )
-
     # Prefer today's Garmin rows; if Connect hasn't published today's downloadable
-    # summary yet, fall back to the latest day we have so sleep/steps still show.
-    sleep_result = await db.execute(
-        select(GarminSleep).where(GarminSleep.user_id == user_id, GarminSleep.day == today)
-    )
-    sleep = sleep_result.scalar_one_or_none()
-    daily_result = await db.execute(
-        select(GarminDailySummary).where(
-            GarminDailySummary.user_id == user_id, GarminDailySummary.day == today
-        )
-    )
-    daily = daily_result.scalar_one_or_none()
-    hrv_result = await db.execute(
-        select(GarminHrv).where(GarminHrv.user_id == user_id, GarminHrv.day == today)
-    )
-    hrv = hrv_result.scalar_one_or_none()
-
-    metrics_day = today
-    if sleep is None and daily is None:
-        latest_daily = await db.execute(
-            select(GarminDailySummary)
-            .where(GarminDailySummary.user_id == user_id)
-            .order_by(GarminDailySummary.day.desc())
-            .limit(1)
-        )
-        daily = latest_daily.scalar_one_or_none()
-        if daily is not None:
-            metrics_day = daily.day
-            sleep_result = await db.execute(
-                select(GarminSleep).where(
-                    GarminSleep.user_id == user_id, GarminSleep.day == metrics_day
-                )
-            )
-            sleep = sleep_result.scalar_one_or_none()
-            hrv_result = await db.execute(
-                select(GarminHrv).where(GarminHrv.user_id == user_id, GarminHrv.day == metrics_day)
-            )
-            hrv = hrv_result.scalar_one_or_none()
-        else:
-            latest_sleep = await db.execute(
-                select(GarminSleep)
-                .where(GarminSleep.user_id == user_id)
-                .order_by(GarminSleep.day.desc())
-                .limit(1)
-            )
-            sleep = latest_sleep.scalar_one_or_none()
-            if sleep is not None:
-                metrics_day = sleep.day
-
-    ctx = await build_context(db, user_id, metrics_day)
+    # summary yet, fall back to the latest day we have so recovery still shows.
+    sleep, daily, hrv, metrics_day = await latest_recovery_rows(db, user_id)
     recovery = RecoveryCard(
         sleep_score=sleep.score if sleep else None,
         sleep_hours=round(sleep.total_seconds / 3600, 1) if sleep and sleep.total_seconds else None,
@@ -161,78 +42,42 @@ async def get_dashboard_today(db, user_id) -> DashboardTodayResponse:
         body_battery_min=daily.bb_min if daily else None,
         body_battery_max=daily.bb_max if daily else None,
         stress_avg=daily.stress_avg if daily else None,
-        recovery_score=ctx.recovery_score,
+        recovery_score=_compute_recovery_score(sleep, hrv, daily),
     )
 
     week_start = start - timedelta(days=7)
     week_acts = await db.execute(
-        select(func.count(GarminActivity.id), func.coalesce(func.sum(GarminActivity.training_load), 0)).where(
-            GarminActivity.user_id == user_id,
-            GarminActivity.start_at >= week_start,
-            GarminActivity.start_at < end,
+        select(func.count(StravaActivity.id), func.coalesce(func.sum(StravaActivity.training_load), 0)).where(
+            StravaActivity.user_id == user_id,
+            StravaActivity.start_at >= week_start,
+            StravaActivity.start_at < end,
         )
     )
     week_row = week_acts.one()
 
     today_acts = await db.execute(
-        select(GarminActivity)
+        select(StravaActivity)
         .where(
-            GarminActivity.user_id == user_id,
-            GarminActivity.start_at >= start,
-            GarminActivity.start_at < end,
+            StravaActivity.user_id == user_id,
+            StravaActivity.start_at >= start,
+            StravaActivity.start_at < end,
         )
-        .order_by(GarminActivity.start_at.desc())
+        .order_by(StravaActivity.start_at.desc())
     )
-    today_list = today_acts.scalars().all()
-    activity_burned = sum(a.calories or 0 for a in today_list)
-
-    def _calories_burned_from_daily(summary: GarminDailySummary | None) -> int | None:
-        if summary is None:
-            return None
-        if summary.calories_total is not None:
-            return int(summary.calories_total)
-        # Some synced rows only have BMR/active; derive total when possible.
-        if summary.calories_bmr is not None or summary.calories_active is not None:
-            return int(summary.calories_bmr or 0) + int(summary.calories_active or 0)
-        raw = summary.raw or {}
-        for key in ("calories_total", "caloriesTotal"):
-            if raw.get(key) not in (None, "None", ""):
-                try:
-                    return int(float(raw[key]))
-                except (TypeError, ValueError):
-                    pass
-        return None
-
-    calories_burned = _calories_burned_from_daily(daily)
-    if calories_burned is None:
-        calories_burned = activity_burned
 
     training = TrainingCard(
-        activities_today=[_activity_dict(a) for a in today_list],
+        activities_today=[activity_summary(a) for a in today_acts.scalars()],
         weekly_load=float(week_row[1] or 0),
         weekly_activities=int(week_row[0] or 0),
-        total_calories_burned_today=calories_burned,
-    )
-
-    streaks = StreakCard(
-        logging_streak_days=await _meal_logging_streak(db, user_id),
-        training_streak_days=await _training_streak(db, user_id, today),
-    )
-
-    goals = GoalsCard(
-        calorie_goal=cal_goal,
-        protein_goal_g=prot_goal,
-        step_goal=daily.step_goal if daily else None,
-        steps_today=daily.steps if daily else None,
     )
 
     recent = await db.execute(
-        select(GarminActivity)
-        .where(GarminActivity.user_id == user_id)
-        .order_by(GarminActivity.start_at.desc())
+        select(StravaActivity)
+        .where(StravaActivity.user_id == user_id)
+        .order_by(StravaActivity.start_at.desc())
         .limit(40)
     )
-    recent_activities = [_activity_dict(a) for a in recent.scalars()]
+    recent_activities = [activity_summary(a) for a in recent.scalars()]
 
     insight_result = await db.execute(
         select(CoachingInsight)
@@ -249,63 +94,29 @@ async def get_dashboard_today(db, user_id) -> DashboardTodayResponse:
         select(GarminSyncRun).order_by(GarminSyncRun.started_at.desc()).limit(1)
     )
     last_sync = sync_result.scalar_one_or_none()
+    strava = await db.get(StravaConnection, user_id)
 
-    him_readiness = await _compute_him_readiness(
+    race = await get_race(db, user_id)
+    readiness = await _compute_readiness(
         db,
         user_id,
+        race=race,
         recovery_score=recovery.recovery_score,
-        macros=macros,
         weekly_activities=training.weekly_activities,
     )
 
     return DashboardTodayResponse(
         date=today,
-        macros=macros,
-        weight=weight,
         recovery=recovery,
         training=training,
-        streaks=streaks,
-        goals=goals,
+        streaks=StreakCard(training_streak_days=await _training_streak(db, user_id, today)),
         recent_activities=recent_activities,
         insights=insights,
         last_garmin_sync=last_sync.finished_at if last_sync else None,
-        calories_burned=calories_burned,
+        last_strava_sync=strava.last_synced_at if strava else None,
         garmin_metrics_as_of=metrics_day if metrics_day != today else None,
-        him_readiness=him_readiness,
+        readiness=readiness,
     )
-
-
-async def get_weight_trend(db: AsyncSession, user_id, days: int = 30) -> WeightTrendResponse:
-    since = datetime.now(UTC) - timedelta(days=days)
-    result = await db.execute(
-        select(BodyWeightEntry.measured_at, BodyWeightEntry.weight_kg)
-        .where(BodyWeightEntry.user_id == user_id, BodyWeightEntry.measured_at >= since)
-        .order_by(BodyWeightEntry.measured_at.asc())
-    )
-    points = [
-        WeightTrendPoint(date=row.measured_at.date(), weight_kg=float(row.weight_kg))
-        for row in result.all()
-    ]
-    return WeightTrendResponse(points=points)
-
-
-async def get_weekly_training(db: AsyncSession, user_id) -> WeeklyTrainingResponse:
-    today = date.today()
-    days_data = []
-    for i in range(6, -1, -1):
-        d = today - timedelta(days=i)
-        start = datetime.combine(d, datetime.min.time(), tzinfo=UTC)
-        end = start + timedelta(days=1)
-        result = await db.execute(
-            select(func.count(GarminActivity.id), func.coalesce(func.sum(GarminActivity.calories), 0)).where(
-                GarminActivity.user_id == user_id,
-                GarminActivity.start_at >= start,
-                GarminActivity.start_at < end,
-            )
-        )
-        row = result.one()
-        days_data.append({"date": d.isoformat(), "activities": int(row[0]), "calories": int(row[1])})
-    return WeeklyTrainingResponse(days=days_data)
 
 
 def _monday_on_or_before(d: date) -> date:
@@ -322,10 +133,10 @@ async def get_weekly_sport_distance(
     end_dt = datetime.combine(this_monday + timedelta(days=7), datetime.min.time(), tzinfo=UTC)
 
     result = await db.execute(
-        select(GarminActivity.sport, GarminActivity.start_at, GarminActivity.distance_m).where(
-            GarminActivity.user_id == user_id,
-            GarminActivity.start_at >= start_dt,
-            GarminActivity.start_at < end_dt,
+        select(StravaActivity.sport, StravaActivity.start_at, StravaActivity.distance_m).where(
+            StravaActivity.user_id == user_id,
+            StravaActivity.start_at >= start_dt,
+            StravaActivity.start_at < end_dt,
         )
     )
 
@@ -358,27 +169,8 @@ async def get_weekly_sport_distance(
     return WeeklySportDistanceResponse(weeks=points)
 
 
-def _parse_race_date() -> date:
-    try:
-        return date.fromisoformat(settings.half_ironman_race_date)
-    except ValueError:
-        return date.today() + timedelta(weeks=8)
-
-
-def _phase_for_weeks(weeks: int) -> str:
-    if weeks <= 0:
-        return "race"
-    if weeks <= 2:
-        return "taper"
-    if weeks <= 4:
-        return "peak"
-    if weeks <= 6:
-        return "build"
-    return "base"
-
-
 def _weekly_volume_targets(phase: str) -> dict[str, float]:
-    """Soft weekly km targets by HIM phase (run / bike / swim)."""
+    """Soft weekly km targets by training phase (run / bike / swim)."""
     targets = {
         "base": {"running": 25.0, "cycling": 80.0, "swimming": 3.0},
         "build": {"running": 35.0, "cycling": 120.0, "swimming": 4.0},
@@ -387,18 +179,6 @@ def _weekly_volume_targets(phase: str) -> dict[str, float]:
         "race": {"running": 8.0, "cycling": 20.0, "swimming": 1.5},
     }
     return targets.get(phase, targets["base"])
-
-
-def _goal_adherence_score(actual: float, goal: float) -> float:
-    """100 at goal; drops if under or over (sweet spot ~90–110%)."""
-    if goal <= 0:
-        return 50.0
-    ratio = actual / goal
-    if ratio <= 1.0:
-        return max(0.0, min(100.0, ratio * 100.0))
-    # Soft penalty past goal; still ok until ~1.15
-    over = ratio - 1.0
-    return max(0.0, min(100.0, 100.0 - over * 180.0))
 
 
 def _pillar_label(score: float) -> str:
@@ -427,10 +207,10 @@ async def _week_sport_km(db: AsyncSession, user_id) -> dict[str, float]:
     start_dt = datetime.combine(monday, datetime.min.time(), tzinfo=UTC)
     end_dt = datetime.combine(monday + timedelta(days=7), datetime.min.time(), tzinfo=UTC)
     result = await db.execute(
-        select(GarminActivity.sport, GarminActivity.distance_m).where(
-            GarminActivity.user_id == user_id,
-            GarminActivity.start_at >= start_dt,
-            GarminActivity.start_at < end_dt,
+        select(StravaActivity.sport, StravaActivity.distance_m).where(
+            StravaActivity.user_id == user_id,
+            StravaActivity.start_at >= start_dt,
+            StravaActivity.start_at < end_dt,
         )
     )
     volumes = {"running": 0.0, "cycling": 0.0, "swimming": 0.0}
@@ -441,52 +221,21 @@ async def _week_sport_km(db: AsyncSession, user_id) -> dict[str, float]:
     return volumes
 
 
-async def _compute_him_readiness(
+async def _compute_readiness(
     db: AsyncSession,
     user_id,
     *,
+    race: RaceInfo,
     recovery_score: float,
-    macros: MacroSummary,
     weekly_activities: int,
-) -> HimReadinessCard:
-    race_date = _parse_race_date()
-    weeks = max(0, (race_date - date.today()).days // 7)
-    phase = _phase_for_weeks(weeks)
+) -> RaceReadinessCard:
+    phase = race.phase
 
     readiness_score = float(max(0.0, min(100.0, recovery_score)))
-    readiness = HimPillarScore(
+    readiness = PillarScore(
         score=round(readiness_score, 1),
         label=_pillar_label(readiness_score),
         detail=f"Recovery {readiness_score:.0f}/100 from sleep · HRV · body battery",
-    )
-
-    food_parts: list[float] = []
-    food_bits: list[str] = []
-    if macros.calorie_goal:
-        cal_score = _goal_adherence_score(float(macros.calories), float(macros.calorie_goal))
-        food_parts.append(cal_score)
-        food_bits.append(f"{macros.calories}/{macros.calorie_goal} kcal")
-    elif macros.calories > 0:
-        food_parts.append(55.0)
-        food_bits.append(f"{macros.calories} kcal logged (no goal set)")
-    else:
-        # Morning / empty day — don't tank the HIM board to zero
-        hour = datetime.now().hour
-        food_parts.append(55.0 if hour < 11 else 25.0)
-        food_bits.append("No meals logged yet")
-
-    if macros.protein_goal_g:
-        prot_score = _goal_adherence_score(float(macros.protein_g), float(macros.protein_goal_g))
-        food_parts.append(prot_score)
-        food_bits.append(f"{macros.protein_g:.0f}/{macros.protein_goal_g}g protein")
-    elif macros.protein_g > 0:
-        food_parts.append(50.0)
-
-    food_score = sum(food_parts) / len(food_parts)
-    food = HimPillarScore(
-        score=round(food_score, 1),
-        label=_pillar_label(food_score),
-        detail=" · ".join(food_bits),
     )
 
     volumes = await _week_sport_km(db, user_id)
@@ -500,7 +249,7 @@ async def _compute_him_readiness(
     session_target = 3 if phase in ("taper", "race") else 5
     session_score = min(100.0, (weekly_activities / session_target) * 100.0)
     training_score = volume_score * 0.7 + session_score * 0.3
-    training = HimPillarScore(
+    training = PillarScore(
         score=round(training_score, 1),
         label=_pillar_label(training_score),
         detail=(
@@ -511,54 +260,29 @@ async def _compute_him_readiness(
         ),
     )
 
-    overall = (readiness_score + food_score + training_score) / 3.0
+    overall = (readiness_score + training_score) / 2.0
     status = _overall_status(overall)
     status_copy = {
-        "on_track": "On track for race day.",
+        "on_track": "On track.",
         "solid": "Solid — a few gaps to close.",
-        "caution": "Caution — recovery, food, or volume needs attention.",
+        "caution": "Caution — recovery or volume needs attention.",
         "off_track": "Off track — prioritize the weakest pillar today.",
     }[status]
-    weakest = min(
-        [("readiness", readiness_score), ("food", food_score), ("training", training_score)],
-        key=lambda x: x[1],
-    )[0]
-    summary = (
-        f"{status_copy} {weeks}w out ({phase}). Weakest today: {weakest}."
-    )
+    weakest = "recovery" if readiness_score < training_score else "training volume"
+    when = f"{race.weeks_to_race}w to {race.name} ({phase})" if race.race_date else "No race set (base)"
+    summary = f"{status_copy} {when}. Weakest today: {weakest}."
 
-    return HimReadinessCard(
+    return RaceReadinessCard(
         overall=round(overall, 1),
         status=status,
-        weeks_to_race=weeks,
+        weeks_to_race=race.weeks_to_race,
         phase=phase,
-        race_date=race_date,
+        race_name=race.name,
+        race_date=race.race_date,
         readiness=readiness,
-        food=food,
         training=training,
         summary=summary,
     )
-
-
-async def _meal_logging_streak(db: AsyncSession, user_id) -> int:
-    streak = 0
-    d = date.today()
-    while True:
-        start = datetime.combine(d, datetime.min.time(), tzinfo=UTC)
-        end = start + timedelta(days=1)
-        result = await db.execute(
-            select(func.count(Meal.id)).where(
-                Meal.user_id == user_id, Meal.status == "confirmed", Meal.logged_at >= start, Meal.logged_at < end
-            )
-        )
-        if int(result.scalar_one()) > 0:
-            streak += 1
-            d -= timedelta(days=1)
-        else:
-            break
-        if streak > 365:
-            break
-    return streak
 
 
 async def _training_streak(db: AsyncSession, user_id, anchor: date | None = None) -> int:
@@ -568,8 +292,8 @@ async def _training_streak(db: AsyncSession, user_id, anchor: date | None = None
         start = datetime.combine(d, datetime.min.time(), tzinfo=UTC)
         end = start + timedelta(days=1)
         result = await db.execute(
-            select(func.count(GarminActivity.id)).where(
-                GarminActivity.user_id == user_id, GarminActivity.start_at >= start, GarminActivity.start_at < end
+            select(func.count(StravaActivity.id)).where(
+                StravaActivity.user_id == user_id, StravaActivity.start_at >= start, StravaActivity.start_at < end
             )
         )
         if int(result.scalar_one()) > 0:

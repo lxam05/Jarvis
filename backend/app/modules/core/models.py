@@ -1,8 +1,8 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -33,6 +33,8 @@ class UserSettings(Base):
     fat_goal_g: Mapped[int | None] = mapped_column(Integer, nullable=True)
     goal_weight_kg: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
     maintenance_calories: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    race_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    race_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

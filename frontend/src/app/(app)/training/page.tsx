@@ -190,8 +190,10 @@ export default function TrainingPage() {
         title="Today's session"
         subtitle={
           coach
-            ? `${coach.race_name} · ${coach.weeks_to_race}w out · ${coach.phase}`
-            : "Half Ironman coach"
+            ? coach.race_date
+              ? `${coach.race_name} · ${coach.weeks_to_race}w out · ${coach.phase}`
+              : `No race set · ${coach.phase}`
+            : "Session coach"
         }
       >
         {coachLoading ? (
@@ -227,15 +229,17 @@ export default function TrainingPage() {
                   HRV <span className="text-[#c8f0ff]">{coach.hrv_status}</span>
                 </span>
               ) : null}
-              <span>
-                Race{" "}
-                <span className="text-[#c8f0ff]">
-                  {new Date(coach.race_date + "T12:00:00").toLocaleDateString(undefined, {
-                    month: "short",
-                    day: "numeric",
-                  })}
+              {coach.race_date ? (
+                <span>
+                  Race{" "}
+                  <span className="text-[#c8f0ff]">
+                    {new Date(coach.race_date + "T12:00:00").toLocaleDateString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                    })}
+                  </span>
                 </span>
-              </span>
+              ) : null}
             </div>
 
             <p className="max-w-2xl text-sm leading-relaxed text-[#c8f0ff]">
@@ -416,12 +420,12 @@ export default function TrainingPage() {
                   }}
                 />
                 <Legend
-                  formatter={(value) =>
+                  formatter={(value: string) =>
                     ({
                       running_km: "Running",
                       cycling_km: "Cycling",
                       swimming_km: "Swimming",
-                    })[value] ?? value
+                    } as Record<string, string>)[value] ?? value
                   }
                   wrapperStyle={{ fontFamily: "var(--font-hud-mono)", fontSize: 11 }}
                 />

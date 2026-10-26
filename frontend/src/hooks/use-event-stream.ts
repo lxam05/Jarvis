@@ -29,8 +29,10 @@ export function useEventStream() {
         for (const line of lines) {
           if (line.startsWith("event: ") && !line.includes("ping")) {
             queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-            queryClient.invalidateQueries({ queryKey: ["meals"] });
             queryClient.invalidateQueries({ queryKey: ["insights"] });
+            queryClient.invalidateQueries({ queryKey: ["activities"] });
+            queryClient.invalidateQueries({ queryKey: ["training"] });
+            queryClient.invalidateQueries({ queryKey: ["coaching"] });
           }
         }
       }

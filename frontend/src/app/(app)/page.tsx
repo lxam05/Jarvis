@@ -27,11 +27,5 @@ export default function DashboardPage() {
     );
   }
 
-  return (
-    <JarvisHud
-      him={data.him_readiness ?? null}
-      calories={data.macros.calories}
-      proteinG={data.macros.protein_g}
-    />
-  );
+  return <JarvisHud data={data} />;
 }

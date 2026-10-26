@@ -1,24 +1,16 @@
 from typing import Annotated
-from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import CurrentUser, verify_sync_agent_key
 from app.core.db import get_db
 from app.modules.garmin.schemas import (
-    ActivityDetailResponse,
     GarminSyncRequest,
     GarminSyncResponse,
     GarminSyncStatusResponse,
 )
-from app.modules.garmin.service import (
-    activity_to_detail,
-    get_activity,
-    list_activities,
-    get_sync_status,
-    process_sync,
-)
+from app.modules.garmin.service import get_sync_status, process_sync
 
 router = APIRouter(prefix="/garmin", tags=["garmin"])
 
@@ -40,23 +32,3 @@ async def sync_status(
     status = await get_sync_status(db)
     return GarminSyncStatusResponse(**status)
 
-
-@router.get("/activities")
-async def activities_list(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    user: CurrentUser,
-    limit: int = Query(default=60, ge=1, le=200),
-) -> list[dict]:
-    return await list_activities(db, user.id, limit)
-
-
-@router.get("/activities/{activity_id}", response_model=ActivityDetailResponse)
-async def activity_detail(
-    activity_id: UUID,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    user: CurrentUser,
-) -> ActivityDetailResponse:
-    activity = await get_activity(db, user.id, activity_id)
-    if activity is None:
-        raise HTTPException(status_code=404, detail="Activity not found")
-    return ActivityDetailResponse(**activity_to_detail(activity))

@@ -1,12 +1,12 @@
 # JARVIS
 
-Personal AI operating system — v1 features: Garmin integration, AI nutrition with meal memory, and a premium health dashboard.
+Personal training app — Strava activities, Garmin recovery (sleep, HRV, body battery), and an AI coach you can ask about your training.
 
 ## Stack
 
 - **Backend:** FastAPI, PostgreSQL, Alembic, OpenAI
 - **Frontend:** Next.js 16, Tailwind CSS 4, Framer Motion, Recharts, TanStack Query
-- **Sync:** Local Mac agent reading GarminDB SQLite
+- **Data:** Strava API for activities; local Mac agent reading GarminDB SQLite for recovery
 
 ## Quick Start
 
@@ -57,11 +57,17 @@ Jarvis/
 | `DATABASE_URL` | PostgreSQL connection string |
 | `JWT_SECRET` | Web auth secret |
 | `SYNC_AGENT_API_KEY` | Sync agent bearer token |
-| `OPENAI_API_KEY` | Nutrition AI & coaching |
-| `STRIPE_SECRET_KEY` | Read-only Stripe key for business metrics (prefer restricted) |
-| `RAILWAY_TOKEN` | Account token for Business page runtime logs ([tokens](https://railway.com/account/tokens)) |
-| `RAILWAY_ENVIRONMENT_ID` / `RAILWAY_SERVICE_ID` | Usually auto-injected on Railway; set manually if logs are empty |
+| `OPENAI_API_KEY` | AI coach chat, session plans and insights |
+| `STRAVA_CLIENT_ID` / `STRAVA_CLIENT_SECRET` | From your Strava API app ([settings/api](https://www.strava.com/settings/api)) |
+| `PUBLIC_API_URL` | Public URL of this API; Strava redirects to `{PUBLIC_API_URL}/v1/strava/callback` |
+| `FRONTEND_URL` | Where the browser returns after connecting Strava |
 | `NEXT_PUBLIC_API_URL` | Frontend → API URL |
+
+## Strava Setup
+
+1. Create an app at https://www.strava.com/settings/api. Set **Authorization Callback Domain** to the API's host (e.g. `your-app.up.railway.app`, or `localhost` for local dev).
+2. Set `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `PUBLIC_API_URL` and `FRONTEND_URL` on the backend.
+3. Open Settings in the app and click **Connect Strava**. The last year of activities is imported, and new ones sync automatically whenever the app is opened (at most every 15 minutes).
 
 ## Railway Deployment
 

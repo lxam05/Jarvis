@@ -120,7 +120,7 @@ export default function ActivityDetailPage() {
       <ActivityMap route={route} />
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <Stat label="Duration" value={formatDuration(data.elapsed_seconds)} />
+        <Stat label="Moving time" value={formatDuration(data.moving_seconds ?? data.elapsed_seconds)} />
         <Stat label="Distance" value={formatDistance(data.distance_m)} />
         <Stat label="Calories" value={data.calories != null ? `${data.calories} kcal` : "—"} />
         {pace ? <Stat label="Pace" value={pace} /> : null}
@@ -128,13 +128,20 @@ export default function ActivityDetailPage() {
         <Stat label="Avg HR" value={data.avg_hr != null ? `${data.avg_hr} bpm` : "—"} />
         <Stat label="Max HR" value={data.max_hr != null ? `${data.max_hr} bpm` : "—"} />
         {data.ascent_m != null ? <Stat label="Ascent" value={`${Math.round(data.ascent_m)} m`} /> : null}
-        {data.descent_m != null ? (
-          <Stat label="Descent" value={`${Math.round(data.descent_m)} m`} />
-        ) : null}
+        {data.avg_watts != null ? <Stat label="Avg power" value={`${Math.round(data.avg_watts)} W`} /> : null}
         {data.training_load != null ? (
-          <Stat label="Training load" value={data.training_load.toFixed(0)} />
+          <Stat label="Relative effort" value={data.training_load.toFixed(0)} />
         ) : null}
       </div>
+
+      <a
+        href={data.strava_url}
+        target="_blank"
+        rel="noreferrer"
+        className="mt-6 inline-flex font-mono text-xs uppercase tracking-[0.12em] text-[var(--accent)] hover:underline"
+      >
+        View on Strava →
+      </a>
     </div>
   );
 }

@@ -14,8 +14,7 @@ from app.modules.core.routes import seed_default_user
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     event_bus.subscribe("garmin.synced", on_domain_event)
-    event_bus.subscribe("meal.logged", on_domain_event)
-    event_bus.subscribe("weight.updated", on_domain_event)
+    event_bus.subscribe("strava.synced", on_domain_event)
 
     async with session_scope() as db:
         await seed_default_user(db)

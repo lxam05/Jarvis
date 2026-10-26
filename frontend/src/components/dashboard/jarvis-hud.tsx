@@ -1,34 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { api } from "@/lib/api";
+import type { DashboardToday } from "@/lib/api";
 import { cn } from "@/lib/utils";
-
-export type HimReadiness = {
-  overall: number;
-  status: string;
-  weeks_to_race: number;
-  phase: string;
-  race_name: string;
-  race_date: string;
-  readiness: { score: number; label: string; detail: string };
-  food: { score: number; label: string; detail: string };
-  training: { score: number; label: string; detail: string };
-  summary: string;
-};
 
 /** Module anchors in % of the HUD canvas — layout + SVG branches. */
 const NODES = {
   hub: { x: 50, y: 50 },
   training: { x: 18, y: 28 },
-  nutrition: { x: 82, y: 28 },
-  business: { x: 12, y: 62 },
-  slotB: { x: 88, y: 62 },
-  slotC: { x: 28, y: 86 },
-  slotD: { x: 72, y: 86 },
-  slotE: { x: 50, y: 14 },
+  coach: { x: 82, y: 28 },
+  recovery: { x: 12, y: 62 },
+  activities: { x: 88, y: 62 },
 } as const;
 
 type NodeKey = keyof typeof NODES;
@@ -43,16 +26,14 @@ function polar(cx: number, cy: number, r: number, deg: number) {
   return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
 }
 
-function formatMoney(amount: number, currency: string) {
-  try {
-    return new Intl.NumberFormat("en-GB", {
-      style: "currency",
-      currency: currency.toUpperCase(),
-      maximumFractionDigits: 0,
-    }).format(amount);
-  } catch {
-    return `${currency.toUpperCase()} ${amount.toFixed(0)}`;
-  }
+function timeAgo(iso: string | null) {
+  if (!iso) return "Never";
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
 }
 
 function MiniRing({ score, size = 64 }: { score: number; size?: number }) {
@@ -233,43 +214,26 @@ function SatelliteShell({
   return <div className={base}>{inner}</div>;
 }
 
-function PlaceholderNode({ className }: { className?: string }) {
+function OpenHint() {
   return (
-    <SatelliteShell title="Placeholder" className={className}>
-      <p className="py-4 text-center font-mono text-xs uppercase tracking-[0.16em] text-[var(--muted)]">
-        Placeholder
-      </p>
-    </SatelliteShell>
+    <p className="pt-1 font-mono text-[0.5rem] uppercase tracking-[0.14em] text-[var(--accent)]">Open →</p>
   );
 }
 
-export function JarvisHud({
-  him,
-  calories,
-  proteinG,
-}: {
-  him: HimReadiness | null;
-  calories: number;
-  proteinG: number;
-}) {
-  const { data: stripe, isError: stripeError } = useQuery({
-    queryKey: ["stripe", "overview"],
-    queryFn: () => api.stripeOverview(),
-    retry: false,
-    refetchInterval: 120_000,
-  });
+function StatRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="font-mono text-[0.55rem] uppercase tracking-[0.12em] text-[var(--muted)]">{label}</span>
+      <span className="hud-metric text-base leading-none">{value}</span>
+    </div>
+  );
+}
 
-  const branches: NodeKey[] = [
-    "training",
-    "nutrition",
-    "business",
-    "slotB",
-    "slotC",
-    "slotD",
-    "slotE",
-  ];
-
-  const overall = him?.overall ?? 0;
+export function JarvisHud({ data }: { data: DashboardToday }) {
+  const readiness = data.readiness;
+  const branches: NodeKey[] = ["training", "coach", "recovery", "activities"];
+  const overall = readiness?.overall ?? 0;
+  const latest = data.recent_activities[0];
 
   return (
     <motion.div
@@ -326,88 +290,61 @@ export function JarvisHud({
           <MiniRing score={overall} />
           <div>
             <p className="font-mono text-[0.6rem] uppercase tracking-[0.12em] text-[var(--muted)]">
-              HIM readiness
+              Readiness
             </p>
             <p className="mt-1 font-mono text-xs text-[#c8f0ff]">
-              {him ? `${him.weeks_to_race}w · ${him.phase}` : "—"}
+              {readiness
+                ? readiness.weeks_to_race != null
+                  ? `${readiness.weeks_to_race}w · ${readiness.phase}`
+                  : readiness.phase
+                : "—"}
             </p>
-            <p className="mt-2 font-mono text-[0.5rem] uppercase tracking-[0.14em] text-[var(--accent)]">
-              Open →
-            </p>
+            <OpenHint />
           </div>
         </div>
       </SatelliteShell>
 
       <SatelliteShell
-        title="Nutrition"
-        href="/nutrition"
+        title="Coach"
+        href="/coach"
         className="right-[3%] top-[16%] sm:right-[6%] sm:top-[18%]"
       >
         <div className="space-y-2">
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="font-mono text-[0.55rem] uppercase tracking-[0.12em] text-[var(--muted)]">
-              Kcal
-            </span>
-            <span className="hud-metric text-lg leading-none">{calories.toLocaleString()}</span>
-          </div>
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="font-mono text-[0.55rem] uppercase tracking-[0.12em] text-[var(--muted)]">
-              Protein
-            </span>
-            <span className="hud-metric text-lg leading-none">
-              {Math.round(proteinG)}
-              <span className="text-xs text-[var(--muted)]">g</span>
-            </span>
-          </div>
-          <p className="pt-1 font-mono text-[0.5rem] uppercase tracking-[0.14em] text-[var(--accent)]">
-            Open →
+          <p className="font-mono text-xs leading-relaxed text-[#c8f0ff]">
+            {data.insights[0]?.title ?? "Ask about your training"}
           </p>
+          <OpenHint />
         </div>
       </SatelliteShell>
 
       <SatelliteShell
-        title="Business"
-        href="/business"
+        title="Recovery"
+        href="/recovery"
         className="left-[2%] top-[54%] sm:left-[4%]"
       >
-        {stripe ? (
-          <div className="space-y-2">
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="font-mono text-[0.55rem] uppercase tracking-[0.12em] text-[var(--muted)]">
-                Today
-              </span>
-              <span className="hud-metric text-base leading-none">
-                {formatMoney(stripe.today.revenue, stripe.currency)}
-              </span>
-            </div>
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="font-mono text-[0.55rem] uppercase tracking-[0.12em] text-[var(--muted)]">
-                Balance
-              </span>
-              <span className="font-mono text-xs text-[#c8f0ff]">
-                {formatMoney(stripe.balance_available, stripe.currency)}
-              </span>
-            </div>
-            <p className="pt-1 font-mono text-[0.5rem] uppercase tracking-[0.14em] text-[var(--accent)]">
-              Open →
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-2 py-1">
-            <p className="font-mono text-xs text-[var(--muted)]">
-              {stripeError ? "Connect Stripe" : "Loading…"}
-            </p>
-            <p className="font-mono text-[0.5rem] uppercase tracking-[0.14em] text-[var(--accent)]">
-              Open →
-            </p>
-          </div>
-        )}
+        <div className="space-y-2">
+          <StatRow label="Score" value={Math.round(data.recovery.recovery_score)} />
+          <StatRow label="Sleep" value={data.recovery.sleep_score ?? "—"} />
+          <StatRow label="HRV" value={data.recovery.hrv_ms != null ? `${data.recovery.hrv_ms}ms` : "—"} />
+          <OpenHint />
+        </div>
       </SatelliteShell>
 
-      <PlaceholderNode className="right-[2%] top-[54%] sm:right-[4%]" />
-      <PlaceholderNode className="bottom-[6%] left-[16%] hidden sm:block" />
-      <PlaceholderNode className="bottom-[6%] right-[16%] hidden sm:block" />
-      <PlaceholderNode className="left-1/2 top-[3%] hidden -translate-x-1/2 sm:block" />
+      <SatelliteShell
+        title="Strava"
+        href={latest ? `/activities/${latest.id}` : "/settings"}
+        className="right-[2%] top-[54%] sm:right-[4%]"
+      >
+        <div className="space-y-2">
+          <StatRow label="7 days" value={`${data.training.weekly_activities} sessions`} />
+          <p className="truncate font-mono text-xs text-[#c8f0ff]">
+            {latest ? latest.name ?? latest.sport : "Connect Strava in Settings"}
+          </p>
+          <p className="font-mono text-[0.55rem] uppercase tracking-[0.12em] text-[var(--muted)]">
+            Synced {timeAgo(data.last_strava_sync)}
+          </p>
+        </div>
+      </SatelliteShell>
     </motion.div>
   );
 }

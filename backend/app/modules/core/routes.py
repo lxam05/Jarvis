@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,12 +16,13 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class SettingsUpdate(BaseModel):
-    calorie_goal: int | None = None
-    protein_goal_g: int | None = None
-    carbs_goal_g: int | None = None
-    fat_goal_g: int | None = None
-    goal_weight_kg: float | None = None
-    maintenance_calories: int | None = None
+    race_name: str | None = None
+    race_date: date | None = None
+
+
+class SettingsResponse(BaseModel):
+    race_name: str | None = None
+    race_date: date | None = None
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -35,6 +37,15 @@ async def login(request: LoginRequest, db: Annotated[AsyncSession, Depends(get_d
 @router.get("/me", response_model=UserResponse)
 async def me(user: Annotated[User, Depends(get_user_from_token)]) -> UserResponse:
     return UserResponse(id=str(user.id), email=user.email, timezone=user.timezone)
+
+
+@router.get("/settings", response_model=SettingsResponse)
+async def get_settings(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: Annotated[User, Depends(get_user_from_token)],
+) -> SettingsResponse:
+    s = await db.get(UserSettings, user.id)
+    return SettingsResponse(race_name=s.race_name if s else None, race_date=s.race_date if s else None)
 
 
 @router.put("/settings")
@@ -67,15 +78,5 @@ async def seed_default_user(db: AsyncSession) -> User:
     db.add(user)
     await db.flush()
 
-    db.add(
-        UserSettings(
-            user_id=user.id,
-            calorie_goal=2500,
-            protein_goal_g=160,
-            carbs_goal_g=250,
-            fat_goal_g=80,
-            goal_weight_kg=78.0,
-            maintenance_calories=2650,
-        )
-    )
+    db.add(UserSettings(user_id=user.id))
     return user
