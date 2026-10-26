@@ -21,7 +21,7 @@ from app.modules.garmin.models import (  # noqa: F401
 from app.modules.strava.models import StravaActivity, StravaConnection  # noqa: F401
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.database_url.replace("+asyncpg", ""))
+config.set_main_option("sqlalchemy.url", settings.database_url.replace("+asyncpg", "+psycopg2"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
