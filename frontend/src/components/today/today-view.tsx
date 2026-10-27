@@ -55,7 +55,8 @@ function SessionHero() {
     staleTime: 10 * 60_000,
   });
 
-  const session = coach?.sessions.find((s) => s.sport === coach.recommended_sport) ?? coach?.sessions[0];
+  // The coach returns today's pick first.
+  const session = coach?.sessions[0];
 
   if (isLoading) {
     return (
@@ -84,7 +85,7 @@ function SessionHero() {
       <p className="flex items-center gap-2 font-medium">
         <span className="h-3 w-3 rounded-full" style={{ background: sportColor(session.sport) }} aria-hidden />
         {sportName(session.sport)}
-        <span className="text-slate">for {session.duration_min} minutes</span>
+        {session.duration_min > 0 ? <span className="text-slate">for {session.duration_min} minutes</span> : null}
       </p>
       <h1 className="display mt-4 max-w-[14ch] text-[clamp(2.8rem,8vw,5.25rem)]">{session.title}.</h1>
       <p className="mt-6 max-w-[58ch] text-[1.05rem] leading-relaxed text-ink/80">{session.description}</p>

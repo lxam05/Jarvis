@@ -7,6 +7,7 @@ from app.modules.coaching.models import CoachingInsight
 from app.modules.coaching.service import (
     RaceInfo,
     _compute_recovery_score,
+    get_athlete,
     get_race,
     latest_recovery_rows,
 )
@@ -169,8 +170,12 @@ async def get_weekly_sport_distance(
     return WeeklySportDistanceResponse(weeks=points)
 
 
-def _weekly_volume_targets(phase: str) -> dict[str, float]:
-    """Soft weekly km targets by training phase (run / bike / swim)."""
+def _weekly_volume_targets(phase: str, sports: list[str]) -> dict[str, float]:
+    """Soft weekly km targets by training phase, for the sports the athlete trains."""
+    if sports == ["running"]:
+        # Half-marathon style build: peak around 40 km, short taper.
+        run_only = {"base": 30.0, "build": 35.0, "peak": 40.0, "taper": 20.0, "race": 10.0}
+        return {"running": run_only.get(phase, 30.0)}
     targets = {
         "base": {"running": 25.0, "cycling": 80.0, "swimming": 3.0},
         "build": {"running": 35.0, "cycling": 120.0, "swimming": 4.0},
@@ -178,7 +183,8 @@ def _weekly_volume_targets(phase: str) -> dict[str, float]:
         "taper": {"running": 18.0, "cycling": 50.0, "swimming": 2.5},
         "race": {"running": 8.0, "cycling": 20.0, "swimming": 1.5},
     }
-    return targets.get(phase, targets["base"])
+    chosen = targets.get(phase, targets["base"])
+    return {sport: km for sport, km in chosen.items() if sport in sports}
 
 
 def _pillar_label(score: float) -> str:
@@ -239,7 +245,8 @@ async def _compute_readiness(
     )
 
     volumes = await _week_sport_km(db, user_id)
-    targets = _weekly_volume_targets(phase)
+    athlete = await get_athlete(db, user_id)
+    targets = _weekly_volume_targets(phase, athlete.sports)
     sport_scores = []
     for sport, target in targets.items():
         actual = volumes[sport]
@@ -253,10 +260,8 @@ async def _compute_readiness(
         score=round(training_score, 1),
         label=_pillar_label(training_score),
         detail=(
-            f"This week run {volumes['running']:.0f}/{targets['running']:.0f} · "
-            f"ride {volumes['cycling']:.0f}/{targets['cycling']:.0f} · "
-            f"swim {volumes['swimming']:.1f}/{targets['swimming']:.1f} km · "
-            f"{weekly_activities} sessions"
+            ", ".join(f"{sport} {volumes[sport]:.0f} of {target:.0f} km" for sport, target in targets.items())
+            + f" this week, {weekly_activities} sessions"
         ),
     )
 
@@ -269,7 +274,7 @@ async def _compute_readiness(
         "off_track": "Off track — prioritize the weakest pillar today.",
     }[status]
     weakest = "recovery" if readiness_score < training_score else "training volume"
-    when = f"{race.weeks_to_race}w to {race.name} ({phase})" if race.race_date else "No race set (base)"
+    when = f"{race.days_to_race} days to {race.name} ({phase})" if race.race_date else "No race set (base)"
     summary = f"{status_copy} {when}. Weakest today: {weakest}."
 
     return RaceReadinessCard(

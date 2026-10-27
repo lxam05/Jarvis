@@ -35,19 +35,39 @@ class RaceInfo:
     name: str | None
     race_date: date | None
     weeks_to_race: int | None
+    days_to_race: int | None
     phase: str
 
 
-def _phase_for_weeks(weeks: int | None) -> str:
-    if weeks is None:
+@dataclass
+class Athlete:
+    sports: list[str]
+    profile: str | None
+
+    @property
+    def running_only(self) -> bool:
+        return self.sports == ["running"]
+
+
+async def get_athlete(db: AsyncSession, user_id: uuid.UUID) -> Athlete:
+    user_settings = await db.get(UserSettings, user_id)
+    sports = [s for s in (user_settings.sports or []) if s in SPORTS] if user_settings else []
+    return Athlete(
+        sports=sports or list(SPORTS),
+        profile=(user_settings.coach_profile or "").strip() or None if user_settings else None,
+    )
+
+
+def _phase_for_days(days: int | None, taper_days: int) -> str:
+    if days is None:
         return "base"
-    if weeks <= 0:
+    if days <= 0:
         return "race"
-    if weeks <= 2:
+    if days <= taper_days:
         return "taper"
-    if weeks <= 4:
+    if days <= 21:
         return "peak"
-    if weeks <= 6:
+    if days <= 42:
         return "build"
     return "base"
 
@@ -57,13 +77,17 @@ async def get_race(db: AsyncSession, user_id: uuid.UUID) -> RaceInfo:
     user_settings = await db.get(UserSettings, user_id)
     race_date = user_settings.race_date if user_settings else None
     if race_date is None or race_date < date.today():
-        return RaceInfo(name=None, race_date=None, weeks_to_race=None, phase="base")
-    weeks = (race_date - date.today()).days // 7
+        return RaceInfo(name=None, race_date=None, weeks_to_race=None, days_to_race=None, phase="base")
+    days = (race_date - date.today()).days
+    # A running race needs about a week of taper; a triathlon closer to two.
+    athlete = await get_athlete(db, user_id)
+    taper_days = 6 if athlete.running_only else 13
     return RaceInfo(
         name=(user_settings.race_name or "Race"),
         race_date=race_date,
-        weeks_to_race=weeks,
-        phase=_phase_for_weeks(weeks),
+        weeks_to_race=days // 7,
+        days_to_race=days,
+        phase=_phase_for_days(days, taper_days),
     )
 
 
@@ -439,6 +463,15 @@ def _build_sessions(phase: str, recovery: float, recommended: str) -> list[Sport
 
 async def recommend_session(db: AsyncSession, user_id: uuid.UUID) -> SessionRecommendationResponse:
     race = await get_race(db, user_id)
+    athlete = await get_athlete(db, user_id)
+    if athlete.running_only:
+        return await _recommend_running(db, user_id, race, athlete)
+    return await _recommend_multisport(db, user_id, race, athlete)
+
+
+async def _recommend_multisport(
+    db: AsyncSession, user_id: uuid.UUID, race: RaceInfo, athlete: Athlete
+) -> SessionRecommendationResponse:
     phase = race.phase
     recovery, sleep_score, hrv_status = await _latest_recovery(db, user_id)
     volumes = await _sport_volume_7d(db, user_id)
@@ -461,6 +494,7 @@ async def recommend_session(db: AsyncSession, user_id: uuid.UUID) -> SessionReco
     if phase == "peak":
         need["cycling"] += 3
 
+    need = {sport: score for sport, score in need.items() if sport in athlete.sports}
     recommended = max(need, key=need.get)
 
     reasons: list[str] = []
@@ -482,7 +516,7 @@ async def recommend_session(db: AsyncSession, user_id: uuid.UUID) -> SessionReco
     )
     reason = " ".join(reasons)
 
-    sessions = _build_sessions(phase, recovery, recommended)
+    sessions = [s for s in _build_sessions(phase, recovery, recommended) if s.sport in athlete.sports]
     sessions = sorted(sessions, key=lambda s: 0 if s.sport == recommended else 1)
 
     if client and settings.openai_api_key:
@@ -493,10 +527,11 @@ async def recommend_session(db: AsyncSession, user_id: uuid.UUID) -> SessionReco
                     {
                         "role": "system",
                         "content": (
-                            "You are a triathlon coach. Given recovery + recent training, "
-                            "return JSON with keys: recommended_sport (running|cycling|swimming), "
-                            "reason (2 short sentences), sessions (array of 3 objects with sport, title, "
-                            "duration_min, intensity, description, focus). Keep sessions practical."
+                            "You are a multisport endurance coach. Given recovery + recent training, "
+                            f"return JSON with keys: recommended_sport (one of {', '.join(athlete.sports)}), "
+                            "reason (2 short sentences), sessions (array with one object per sport, each with "
+                            "sport, title, duration_min, intensity, description, focus). Keep sessions practical. "
+                            "Follow the athlete profile if given."
                         ),
                     },
                     {
@@ -505,6 +540,7 @@ async def recommend_session(db: AsyncSession, user_id: uuid.UUID) -> SessionReco
                             {
                                 "race": race.name,
                                 "weeks_to_race": race.weeks_to_race,
+                                "athlete_profile": athlete.profile,
                                 "phase": phase,
                                 "recovery_score": recovery,
                                 "sleep_score": sleep_score,
@@ -520,13 +556,13 @@ async def recommend_session(db: AsyncSession, user_id: uuid.UUID) -> SessionReco
                 response_format={"type": "json_object"},
             )
             data = json.loads(response.choices[0].message.content or "{}")
-            if data.get("recommended_sport") in SPORTS:
+            if data.get("recommended_sport") in athlete.sports:
                 recommended = data["recommended_sport"]
             if data.get("reason"):
                 reason = str(data["reason"])
-            if isinstance(data.get("sessions"), list) and len(data["sessions"]) >= 3:
-                parsed = [SportSession(**item) for item in data["sessions"][:3]]
-                if {s.sport for s in parsed} >= set(SPORTS):
+            if isinstance(data.get("sessions"), list) and len(data["sessions"]) >= len(athlete.sports):
+                parsed = [SportSession(**item) for item in data["sessions"][: len(athlete.sports)]]
+                if {s.sport for s in parsed} >= set(athlete.sports):
                     sessions = sorted(parsed, key=lambda s: 0 if s.sport == recommended else 1)
         except Exception:
             pass
@@ -546,9 +582,188 @@ async def recommend_session(db: AsyncSession, user_id: uuid.UUID) -> SessionReco
     )
 
 
-COACH_SYSTEM_PROMPT = """You are the athlete's personal endurance coach (run, bike, swim / triathlon).
+RUN_PLAN_PROMPT = """You are a running coach writing today's session for one athlete.
+Be direct and honest, not encouraging for its own sake. Reference their actual data.
+
+Return JSON with keys:
+- reason: 2-3 short, blunt sentences on why this is today's session.
+- sessions: exactly 3 objects with keys sport, title, duration_min, intensity, description, focus.
+  sessions[0] is what they should do today. sessions[1] is a lower-stress alternative.
+  sessions[2] is the fallback if something hurts: rest or easy cross-training.
+  Running sessions use sport "running"; the fallback uses "rest", "cycling" or "swimming".
+  intensity is one of: rest, recovery, easy, steady, progressive, tempo, threshold, intervals, vo2, race.
+
+Rules:
+- Session types: easy, progressive, tempo, intervals, VO2 max, long run, strides, rest.
+- Give concrete targets: min/km paces (from their goal and recent runs) or HR, warm-up and cool-down.
+- Never put two hard days back to back. Respect the taper and race-day timing.
+- The athlete profile is written by the athlete and overrides these defaults."""
+
+
+async def _recent_runs(db: AsyncSession, user_id: uuid.UUID, days: int) -> list[StravaActivity]:
+    since = datetime.now(UTC) - timedelta(days=days)
+    result = await db.execute(
+        select(StravaActivity)
+        .where(
+            StravaActivity.user_id == user_id,
+            StravaActivity.sport == "running",
+            StravaActivity.start_at >= since,
+        )
+        .order_by(StravaActivity.start_at.desc())
+    )
+    return list(result.scalars())
+
+
+def _draft_run_sessions(race: RaceInfo, recovery: float, runs: list[StravaActivity]) -> tuple[list[SportSession], str]:
+    """Rule-based plan used when the AI is unavailable, and as its starting point."""
+    today = date.today()
+    days = race.days_to_race
+    last_run_day = runs[0].start_at.date() if runs else None
+    days_since_run = (today - last_run_day).days if last_run_day else 99
+    hard_recent = any(
+        (r.training_load or 0) >= 60 or float(r.distance_m or 0) >= 16000
+        for r in runs
+        if (today - r.start_at.date()).days <= 1
+    )
+
+    def run(title, minutes, intensity, description, focus):
+        return SportSession(
+            sport="running", title=title, duration_min=minutes, intensity=intensity, description=description, focus=focus
+        )
+
+    easy = run("Easy run", 40, "easy", "Conversational pace the whole way. Stop if a calf tightens.", "Aerobic volume")
+    rest = SportSession(
+        sport="rest",
+        title="Rest",
+        duration_min=0,
+        intensity="rest",
+        description="No running. Calf raises and mobility only. Easy spin or swim only if you must move.",
+        focus="Let the calves recover",
+    )
+
+    if days == 0:
+        primary, reason = run("Race day", 90, "race", "Warm up 10 min easy with 3 strides. Race.", "Execute"), "It's race day."
+    elif days == 1:
+        primary = run("Shakeout", 20, "recovery", "20 min very easy with 4 × 20 s strides.", "Stay loose")
+        reason = "Race tomorrow. Keep it short."
+    elif days == 2:
+        primary, reason = rest, "Two days out: rest so your legs are fresh."
+    elif days is not None and days <= 6:
+        if days in (3, 4):
+            primary = run(
+                "Race-pace sharpener", 40, "tempo",
+                "15 min easy, 3 × 2 km at goal race pace with 2 min jog, 10 min easy.", "Lock in race pace",
+            )
+        else:
+            primary = run("Easy taper run", 35, "easy", "Easy pace, finish with 4 × 20 s strides.", "Freshness")
+        reason = f"Taper: {days} days to go. Volume down, a little intensity to stay sharp."
+    elif recovery < 40:
+        primary, reason = easy, f"Recovery is {recovery:.0f}/100. Today is easy, no arguments."
+    elif hard_recent:
+        primary, reason = easy, "You ran hard or long in the last day. Easy today."
+    elif days_since_run >= 3:
+        primary = run("Progressive run", 45, "progressive", "Start easy, finish the last 10 min at steady effort.", "Ease back in")
+        reason = f"{days_since_run} days without a run. Don't jump straight into a hard session."
+    else:
+        weekday = today.weekday()
+        if weekday == 1:
+            primary = run(
+                "VO2 intervals", 50, "vo2", "15 min easy, 5 × 3 min hard with 2 min jog, 10 min easy.", "Raise the ceiling"
+            )
+        elif weekday == 3:
+            primary = run("Tempo run", 50, "tempo", "15 min easy, 20 min at tempo, 10 min easy.", "Threshold")
+        elif weekday in (5, 6):
+            primary = run(
+                "Long progressive run", 85, "progressive", "Long and easy, last 15 min at goal half-marathon pace.", "Endurance"
+            )
+        else:
+            primary = easy
+        reason = "Recovery is fine. Keep building."
+
+    alternative = easy if primary.title != easy.title else run(
+        "Recovery jog", 30, "recovery", "Very easy 30 min.", "Absorb training"
+    )
+    fallback = rest if primary is not rest else run("Recovery jog", 20, "recovery", "Very easy 20 min.", "Blood flow")
+    return [primary, alternative, fallback], reason
+
+
+async def _recommend_running(
+    db: AsyncSession, user_id: uuid.UUID, race: RaceInfo, athlete: Athlete
+) -> SessionRecommendationResponse:
+    recovery, sleep_score, hrv_status = await _latest_recovery(db, user_id)
+    runs = await _recent_runs(db, user_id, 14)
+    sessions, reason = _draft_run_sessions(race, recovery, runs)
+    week_km = sum(float(r.distance_m or 0) for r in runs if r.start_at >= datetime.now(UTC) - timedelta(days=7)) / 1000
+
+    if client and settings.openai_api_key:
+        try:
+            response = await client.chat.completions.create(
+                model=settings.openai_model,
+                messages=[
+                    {"role": "system", "content": RUN_PLAN_PROMPT},
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "today": date.today().strftime("%A %d %B %Y"),
+                                "race": (
+                                    {"name": race.name, "date": race.race_date.isoformat(), "days_to_go": race.days_to_race}
+                                    if race.race_date
+                                    else None
+                                ),
+                                "phase": race.phase,
+                                "athlete_profile": athlete.profile,
+                                "recovery": {"score": round(recovery), "sleep_score": sleep_score, "hrv_status": hrv_status},
+                                "km_last_7_days": round(week_km, 1),
+                                "runs_last_14_days": [
+                                    {
+                                        "date": r.start_at.date().isoformat(),
+                                        "name": r.name,
+                                        "km": round(float(r.distance_m) / 1000, 2) if r.distance_m else None,
+                                        "moving_min": round(r.moving_seconds / 60) if r.moving_seconds else None,
+                                        "pace": _pace_summary(r),
+                                        "avg_hr": r.avg_hr,
+                                        "relative_effort": float(r.training_load) if r.training_load else None,
+                                    }
+                                    for r in runs
+                                ],
+                                "rule_based_draft": [s.model_dump() for s in sessions],
+                            }
+                        ),
+                    },
+                ],
+                response_format={"type": "json_object"},
+            )
+            data = json.loads(response.choices[0].message.content or "{}")
+            parsed = [SportSession(**item) for item in data.get("sessions", [])[:3]]
+            if len(parsed) >= 2 and parsed[0].sport in ("running", "rest"):
+                sessions = parsed
+            if data.get("reason"):
+                reason = str(data["reason"])
+        except Exception:
+            pass
+
+    return SessionRecommendationResponse(
+        race_name=race.name,
+        race_date=race.race_date,
+        weeks_to_race=race.weeks_to_race,
+        phase=race.phase,
+        recovery_score=recovery,
+        sleep_score=sleep_score,
+        hrv_status=hrv_status,
+        recommended_sport=sessions[0].sport,
+        reason=reason,
+        sessions=sessions,
+        recent_mix={"running": round(week_km, 2)},
+    )
+
+
+COACH_SYSTEM_PROMPT = """You are the athlete's personal endurance coach, for the sports they actually train.
 You get a JSON snapshot of their real data: Strava activities, weekly volume, and Garmin recovery
-(sleep, HRV, body battery, resting HR). Answer their question using that data.
+(sleep, HRV, body battery, resting HR), plus a profile the athlete wrote about their goals,
+injuries and how they want to be coached. Answer their question using that data.
+
+- The athlete profile overrides your defaults, including tone. Follow it.
 
 - Be specific: cite actual sessions, dates, distances, paces and trends from the snapshot.
 - Be concise and practical. Use km, min/km for running, km/h for cycling, min/100m for swimming.
@@ -654,7 +869,7 @@ async def _coach_snapshot(db: AsyncSession, user_id: uuid.UUID) -> dict:
     return {
         "today": today.isoformat(),
         "race": (
-            {"name": race.name, "date": race.race_date.isoformat(), "weeks_to_go": race.weeks_to_race}
+            {"name": race.name, "date": race.race_date.isoformat(), "days_to_go": race.days_to_race}
             if race.race_date
             else None
         ),
@@ -679,10 +894,16 @@ async def chat_with_coach(db: AsyncSession, user_id: uuid.UUID, messages: list[C
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Coach needs OPENAI_API_KEY set on the server")
 
     snapshot = await _coach_snapshot(db, user_id)
+    athlete = await get_athlete(db, user_id)
+    about = (
+        f"Sports the athlete trains: {', '.join(athlete.sports)}.\n"
+        f"Athlete profile, in their own words:\n{athlete.profile or '(none written yet)'}"
+    )
     response = await client.chat.completions.create(
         model=settings.openai_model,
         messages=[
             {"role": "system", "content": COACH_SYSTEM_PROMPT},
+            {"role": "system", "content": about},
             {"role": "system", "content": "Athlete data snapshot:\n" + json.dumps(snapshot, default=str)},
             *[{"role": m.role, "content": m.content} for m in messages[-CHAT_HISTORY_LIMIT:]],
         ],

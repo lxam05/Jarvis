@@ -80,7 +80,14 @@ export type StravaStatus = {
 
 export type CoachMessage = { role: "user" | "assistant"; content: string };
 
-export type UserSettings = { race_name: string | null; race_date: string | null };
+export type SportKey = "running" | "cycling" | "swimming";
+
+export type UserSettings = {
+  race_name: string | null;
+  race_date: string | null;
+  sports: SportKey[];
+  coach_profile: string | null;
+};
 
 function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -172,7 +179,7 @@ export const api = {
 
   getSettings: () => apiFetch<UserSettings>("/v1/auth/settings"),
 
-  updateSettings: (settings: UserSettings) =>
+  updateSettings: (settings: Partial<UserSettings>) =>
     apiFetch<{ ok: boolean }>("/v1/auth/settings", {
       method: "PUT",
       body: JSON.stringify(settings),

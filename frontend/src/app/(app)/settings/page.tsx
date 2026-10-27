@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Panel, Spinner } from "@/components/ui/card";
-import { api } from "@/lib/api";
+import { api, type SportKey } from "@/lib/api";
+import { SPORTS, SPORT_COLOR, SPORT_NAME } from "@/lib/sport";
+import { cn } from "@/lib/utils";
 
 const CONNECT_MESSAGES: Record<string, string> = {
   connected: "Strava connected. Your activities are imported.",
@@ -35,6 +37,15 @@ export default function SettingsPage() {
   const [raceDateDraft, setRaceDate] = useState<string>();
   const raceName = raceNameDraft ?? userSettings?.race_name ?? "";
   const raceDate = raceDateDraft ?? userSettings?.race_date ?? "";
+  const [sportsDraft, setSports] = useState<SportKey[]>();
+  const [profileDraft, setProfile] = useState<string>();
+  const sports = sportsDraft ?? userSettings?.sports ?? ["running", "cycling", "swimming"];
+  const profile = profileDraft ?? userSettings?.coach_profile ?? "";
+
+  const toggleSport = (sport: SportKey) => {
+    const next = sports.includes(sport) ? sports.filter((s) => s !== sport) : [...sports, sport];
+    if (next.length) setSports(next);
+  };
 
   useEffect(() => {
     // The Strava OAuth callback lands here with ?strava=<outcome>.
@@ -75,6 +86,15 @@ export default function SettingsPage() {
     },
   });
 
+  const saveProfile = useMutation({
+    mutationFn: () => api.updateSettings({ sports, coach_profile: profile.trim() || null }),
+    onSuccess: () => {
+      setNotice("Coach profile saved. Today's plan will use it.");
+      queryClient.invalidateQueries({ queryKey: ["settings"] });
+      refreshAll();
+    },
+  });
+
   const saveRace = useMutation({
     mutationFn: () =>
       api.updateSettings({ race_name: raceName.trim() || null, race_date: raceDate || null }),
@@ -85,7 +105,7 @@ export default function SettingsPage() {
     },
   });
 
-  const mutationError = [connectMutation, syncMutation, disconnectMutation, saveRace].find((m) => m.isError)
+  const mutationError = [connectMutation, syncMutation, disconnectMutation, saveRace, saveProfile].find((m) => m.isError)
     ?.error;
 
   return (
@@ -170,6 +190,63 @@ export default function SettingsPage() {
               </div>
             </dl>
           )}
+        </Panel>
+
+        <Panel className="md:p-8">
+          <h2 className="display-sm text-[1.5rem]">Coach profile</h2>
+          <p className="mt-1 max-w-[56ch] text-slate">
+            What the coach should know about you. It reads this before every plan and answer, on top of your Strava
+            and Garmin data.
+          </p>
+          <form
+            className="mt-6 space-y-6"
+            onSubmit={(e) => {
+              e.preventDefault();
+              saveProfile.mutate();
+            }}
+          >
+            <fieldset>
+              <legend className="text-[0.85rem] text-slate">Sports you train</legend>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {SPORTS.map((sport) => {
+                  const on = sports.includes(sport);
+                  return (
+                    <button
+                      key={sport}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => toggleSport(sport)}
+                      className={cn(
+                        "flex items-center gap-2 rounded-full border px-4 py-2 text-[0.92rem] font-medium transition-colors",
+                        on ? "border-ink bg-paper" : "border-transparent bg-haze-strong text-slate hover:text-ink"
+                      )}
+                    >
+                      <span
+                        className="h-2.5 w-2.5 rounded-full"
+                        style={{ background: on ? SPORT_COLOR[sport] : "var(--line)" }}
+                        aria-hidden
+                      />
+                      {SPORT_NAME[sport]}
+                    </button>
+                  );
+                })}
+              </div>
+            </fieldset>
+            <label className="block">
+              <span className="text-[0.85rem] text-slate">About you</span>
+              <textarea
+                value={profile}
+                onChange={(e) => setProfile(e.target.value)}
+                rows={10}
+                maxLength={4000}
+                placeholder="Goal race and target time, injuries or niggles, which days you can train, session types you like, how blunt the coach should be…"
+                className="field mt-1.5 resize-y leading-relaxed"
+              />
+            </label>
+            <button type="submit" disabled={saveProfile.isPending} className="btn btn-primary">
+              Save profile
+            </button>
+          </form>
         </Panel>
 
         <Panel className="md:p-8">

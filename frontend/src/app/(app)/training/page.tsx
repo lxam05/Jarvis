@@ -6,7 +6,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import { ActivityList } from "@/components/activities/activity-row";
 import { Section, Spinner } from "@/components/ui/card";
 import { api, type ActivitySummary } from "@/lib/api";
-import { SPORTS, SPORT_COLOR, SPORT_HEX, SPORT_NAME, type Sport, asSport, startOfWeek } from "@/lib/sport";
+import { SPORTS, SPORT_COLOR, SPORT_HEX, SPORT_NAME, type Sport, asSport, sportName, startOfWeek } from "@/lib/sport";
 import { cn } from "@/lib/utils";
 
 /** Scale actual km → run-equivalent km for comparable bar heights. */
@@ -49,7 +49,8 @@ function Toggle({ enabled, onChange }: { enabled: boolean; onChange: (next: bool
 }
 
 export default function TrainingPage() {
-  const [selectedSport, setSelectedSport] = useState<Sport | null>(null);
+  // Options are picked by position: a runner gets several running sessions to choose from.
+  const [selected, setSelected] = useState(0);
   const [equivalences, setEquivalences] = useState(false);
 
   const { data: coach, isLoading: coachLoading, isError: coachError } = useQuery({
@@ -89,14 +90,16 @@ export default function TrainingPage() {
     [distance, equivalences]
   );
 
-  const totals = SPORTS.map((sport) => ({
+  const allTotals = SPORTS.map((sport) => ({
     sport,
     km: (distance?.weeks ?? []).reduce((sum, w) => sum + w[KEY[sport]], 0),
   }));
+  // Only chart the sports actually trained in this window.
+  const totals = allTotals.filter((t) => t.km > 0);
+  const charted = totals.length ? totals.map((t) => t.sport) : (["running"] as Sport[]);
+  const multiSport = charted.length > 1;
 
-  const recommended = asSport(coach?.recommended_sport);
-  const activeSport = selectedSport ?? recommended;
-  const activeSession = coach?.sessions.find((s) => s.sport === activeSport);
+  const activeSession = coach?.sessions[selected] ?? coach?.sessions[0];
 
   return (
     <div>
@@ -122,16 +125,16 @@ export default function TrainingPage() {
         ) : (
           <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
             <div role="radiogroup" aria-label="Sport" className="flex flex-col gap-2">
-              {coach.sessions.map((session) => {
+              {coach.sessions.map((session, index) => {
                 const sport = asSport(session.sport);
-                const isSelected = session.sport === activeSport;
+                const isSelected = session === activeSession;
                 return (
                   <button
-                    key={session.sport}
+                    key={index}
                     type="button"
                     role="radio"
                     aria-checked={isSelected}
-                    onClick={() => sport && setSelectedSport(sport)}
+                    onClick={() => setSelected(index)}
                     className={cn(
                       "flex items-center gap-4 rounded-[18px] border px-5 py-4 text-left transition-colors",
                       isSelected ? "border-ink bg-paper" : "border-transparent bg-haze hover:bg-haze-strong"
@@ -145,10 +148,11 @@ export default function TrainingPage() {
                     <span className="min-w-0 flex-1">
                       <span className="block font-semibold">{session.title}</span>
                       <span className="block text-[0.88rem] text-slate">
-                        {sport ? SPORT_NAME[sport] : session.sport}, {session.duration_min} min, {session.intensity}
+                        {sport ? SPORT_NAME[sport] : sportName(session.sport)}
+                        {session.duration_min > 0 ? `, ${session.duration_min} min` : ""}, {session.intensity}
                       </span>
                     </span>
-                    {session.sport === coach.recommended_sport ? (
+                    {index === 0 ? (
                       <span className="shrink-0 rounded-full bg-ink px-2.5 py-1 text-[0.75rem] font-semibold text-paper">
                         Coach&apos;s pick
                       </span>
@@ -175,8 +179,12 @@ export default function TrainingPage() {
       <Section
         className="mt-20"
         title="Weekly distance"
-        subtitle={equivalences ? "Swim 1.5 km counts as 10 km running; ride km divided by 4." : "Last 8 weeks, in km."}
-        action={<Toggle enabled={equivalences} onChange={setEquivalences} />}
+        subtitle={
+          equivalences && multiSport
+            ? "Swim 1.5 km counts as 10 km running; ride km divided by 4."
+            : "Last 8 weeks, in km."
+        }
+        action={multiSport ? <Toggle enabled={equivalences} onChange={setEquivalences} /> : undefined}
       >
         <div className="mb-6 flex flex-wrap gap-x-8 gap-y-2">
           {totals.map(({ sport, km }) => (
@@ -225,7 +233,7 @@ export default function TrainingPage() {
                       : [`${num.toFixed(1)} km`, label];
                   }}
                 />
-                {SPORTS.map((sport) => (
+                {charted.map((sport) => (
                   <Bar key={sport} dataKey={KEY[sport]} fill={SPORT_HEX[sport]} radius={[6, 6, 0, 0]} />
                 ))}
               </BarChart>

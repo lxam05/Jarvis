@@ -1,8 +1,8 @@
 from datetime import date
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,14 +15,21 @@ from app.modules.core.schemas import LoginRequest, TokenResponse, UserResponse
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+Sport = Literal["running", "cycling", "swimming"]
+
+
 class SettingsUpdate(BaseModel):
     race_name: str | None = None
     race_date: date | None = None
+    sports: list[Sport] | None = Field(default=None, min_length=1)
+    coach_profile: str | None = Field(default=None, max_length=4000)
 
 
 class SettingsResponse(BaseModel):
     race_name: str | None = None
     race_date: date | None = None
+    sports: list[Sport] = ["running", "cycling", "swimming"]
+    coach_profile: str | None = None
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -45,7 +52,14 @@ async def get_settings(
     user: Annotated[User, Depends(get_user_from_token)],
 ) -> SettingsResponse:
     s = await db.get(UserSettings, user.id)
-    return SettingsResponse(race_name=s.race_name if s else None, race_date=s.race_date if s else None)
+    if s is None:
+        return SettingsResponse()
+    return SettingsResponse(
+        race_name=s.race_name,
+        race_date=s.race_date,
+        sports=s.sports or ["running", "cycling", "swimming"],
+        coach_profile=s.coach_profile,
+    )
 
 
 @router.put("/settings")
